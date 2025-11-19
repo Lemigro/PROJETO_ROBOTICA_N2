@@ -1,0 +1,55 @@
+# Configurações do Drone de Entregas
+
+simulation:
+  timestep: 0.004166666666666667  # Passo de simulação (240 Hz = 1/240)
+  gravity: -9.81
+  base_position: [0, 0, 2.0]  # Posição inicial da base (altura aumentada)
+  
+drone:
+  model: "quadrotor"  # ou "racecar" / "husky" para teste terrestre
+  mass: 1.0
+  max_velocity: 1.5  # m/s (reduzido ainda mais para movimento suave)
+  max_acceleration: 0.8  # m/s² (reduzido)
+  
+control:
+  pid:
+    position:
+      kp: [2.0, 2.0, 5.0]  # [x, y, z]
+      ki: [0.0, 0.0, 0.0]
+      kd: [0.5, 0.5, 1.0]
+    attitude:
+      kp: [1.0, 1.0, 1.0]  # roll, pitch, yaw
+      ki: [0.0, 0.0, 0.0]
+      kd: [0.1, 0.1, 0.1]
+  
+sensor:
+  detection_radius: 5.0  # Raio de detecção de pontos (metros) - aumentado para detectar mais pontos
+  update_rate: 10  # Hz
+  
+route_planning:
+  algorithm: "nearest_neighbor"  # ou "greedy" / "2opt"
+  replan_interval: 1.0  # Tempo entre replanejamentos (segundos)
+  min_distance_threshold: 1.5  # Distância horizontal mínima para considerar entrega concluída (aumentado)
+  
+environment:
+  area_size: [50, 50]  # Tamanho da área de patrulha [largura, altura]
+  num_delivery_points: 10  # Número inicial de pontos (objetivo: ~100)
+  point_spacing: 5.0  # Espaçamento mínimo entre pontos
+  
+node_red:
+  enabled: true
+  protocol: "http"  # ou "mqtt"
+  http:
+    url: "http://localhost:1880/drone-data"
+    interval: 0.5  # Intervalo de envio (segundos)
+  mqtt:
+    broker: "localhost"
+    port: 1883
+    topic: "drone/delivery"
+    interval: 0.5
+
+logging:
+  level: "INFO"
+  file: "logs/drone_simulation.log"
+  console: true
+
