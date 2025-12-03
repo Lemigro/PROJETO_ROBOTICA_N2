@@ -1,185 +1,154 @@
-# 🤖 Projeto Robótica N2
+# 🤖 Projeto Integrado de Robótica e Automação — N2
 
-Sistema completo de simulação robótica com três projetos integrados: Braço Mecânico, Drone de Entregas e Robô Aspirador Inteligente.
+**Simulações Robóticas com PyBullet + Telemetria em Node-RED**
 
-## 📦 Projetos
+Este repositório reúne três simulações robóticas independentes desenvolvidas em **Python** usando a engine de física **PyBullet**.
+O objetivo é aplicar conceitos de **controle**, **planejamento**, **mapeamento**, **cinemática** e **comunicação**, com monitoramento em **tempo real via Node-RED**.
 
-### 1. 🤖 Braço Mecânico (`braco_mecanico/`)
-- **Manipulador Planar 2/3 DOF**: Controle PID, cinemática direta
-- **Robô Móvel Diferencial**: Evasão de obstáculos, navegação reativa
-- **Protocolo**: MQTT
-- **Dashboard**: 2 abas separadas no Node-RED
+---
 
-### 2. 🚁 Drone de Entregas (`drone/`)
-- Planejamento dinâmico de rotas (TSP dinâmico)
-- Detecção e entrega de pontos
-- Replanejamento adaptativo
-- **Protocolo**: HTTP
-- **Dashboard**: 1 aba no Node-RED
+## 📋 Visão Geral
 
-### 3. 🏠 Robô Aspirador (`robo_aspirador/`)
-- Mapeamento de ocupação 2D
-- Aprendizado de rotas
-- Otimização entre execuções
-- **Protocolo**: HTTP
-- **Dashboard**: 1 aba no Node-RED
+| Projeto                            | Diretório         | Descrição                               | Tecnologias-Chave                    |
+| ---------------------------------- | ----------------- | --------------------------------------- | ------------------------------------ |
+| 🚁 **Drone de Entregas**           | `/drone`          | Planejamento de rotas e controle de voo | TSP, Algoritmos Gulosos, PID         |
+| 🧹 **Robô Aspirador**              | `/robo_aspirador` | Mapeamento e aprendizado                | Grid Mapping, SLAM simples           |
+| 🦾 **Braço Mecânico & Robô Móvel** | `/braco_mecanico` | Controle e cinemática                   | PID, Cinemática Direta/Inversa, MQTT |
 
-## 🚀 Início Rápido
+---
 
-### Pré-requisitos Globais
+## 📂 Estrutura do Repositório
 
-- Python 3.8+
-- Node.js (para Node-RED)
-- Mosquitto MQTT Broker (para Braço Mecânico)
-
-### Instalação Completa
-
-```bash
-# 1. Limpar e preparar (opcional)
-.\limpar_tudo.bat
-
-# 2. Iniciar todos os projetos
-.\iniciar_todos_projetos.bat
-
-# 3. Ou instalar manualmente em cada projeto:
-cd braco_mecanico && pip install -r config/requirements.txt
-cd ../drone && pip install -r requirements.txt
-cd ../robo_aspirador && pip install -r requirements.txt
+```
+root/
+├── drone/                  
+│   ├── src/                
+│   ├── config/             
+│   └── README.md           
+│
+├── robo_aspirador/         
+│   ├── src/                
+│   ├── maps/               
+│   └── docs/               
+│
+├── braco_mecanico/         
+│   ├── src/
+│   ├── examples/
+│   └── docs/
+│
+└── README.md               
 ```
 
-### Iniciar Serviços
+---
+
+# 🚀 Detalhes dos Projetos
+
+## 1. 🚁 Drone de Entregas — Planejamento Dinâmico
+
+Simulação em que um drone identifica pontos e entrega pacotes da forma mais eficiente possível.
+
+### **Principais Recursos**
+
+* Planejamento de rota baseado no **Traveling Salesperson Problem (TSP)**
+* Controle de voo com **PID**
+* Algoritmos gulosos para otimização
+* Telemetria integrada com Node-RED (posição, velocidade e progresso das entregas)
+
+---
+
+## 2. 🧹 Robô Aspirador — Mapeamento e Aprendizado
+
+Voltado para exploração autônoma de ambientes desconhecidos.
+
+### **Características**
+
+* Construção de **Grid Map** usando sensores ultrassônicos
+* Modo *Aprendizado*: melhora o caminho com base em mapas armazenados
+* Geração automática de mapas em JSON
+* Dashboard em tempo real com evolução do mapa
+
+---
+
+## 3. 🦾 Braço Mecânico & Robô Móvel
+
+Um conjunto de simulações focadas nos fundamentos matemáticos e físicos da robótica.
+
+### **Braço Mecânico**
+
+* Manipulador planar (2–3 DOF)
+* Controle **PID**
+* Cálculo de cinemática direta e inversa
+* Métricas de desempenho (erro, overshoot, torque)
+
+### **Robô Móvel**
+
+* Veículo diferencial
+* Lógica reativa e desvio de obstáculos
+* Integração com PyBullet
+
+### **Comunicação MQTT**
+
+* Envio estruturado de dados usando Mosquitto Broker
+
+---
+
+# 🛠️ Instalação e Requisitos
+
+## ✔ Pré-requisitos Globais
+
+* Python **3.8+**
+* Node.js (para Node-RED)
+* Mosquitto MQTT Broker *(necessário para o braço mecânico)*
+
+## ✔ Instalação de um módulo
+
+Cada projeto é independente.
 
 ```bash
-# Mosquitto (para Braço Mecânico)
-net start mosquitto
+cd drone
+# ou
+cd robo_aspirador
+# ou
+cd braco_mecanico
 
-# Node-RED (para todos os projetos)
+pip install -r requirements.txt
+```
+
+---
+
+# 📊 Dashboard de Telemetria — Node-RED
+
+Os três projetos fornecem dados visualizados num dashboard único.
+
+### **Instalação**
+
+```bash
+npm install -g node-red
+```
+
+### **Executar**
+
+```bash
 node-red
 ```
 
-### Configurar Node-RED
+### **Acessar**
 
-1. Acesse: http://localhost:1880
-2. Importe os 3 fluxos:
-   - `braco_mecanico/node_red/node_red_flow_organizado.json`
-   - `drone/node_red_complete.json`
-   - `robo_aspirador/node-red/node-red-flow-corrigido.json`
-3. Faça Deploy
-4. Acesse Dashboard: http://localhost:1880/ui
+[http://localhost:1880](http://localhost:1880)
 
-## 📊 Dashboards
+### **Importar os Dashboards**
 
-O dashboard Node-RED possui **4 abas separadas**:
-
-1. **Manipulador Planar** - Métricas do braço robótico
-2. **Robô Móvel** - Métricas do robô diferencial
-3. **Drone de Entregas** - Trajetória, métricas e pontos
-4. **Robô Aspirador** - Cobertura, eficiência e trajetória
-
-## 🎯 Executar Projetos
-
-### Braço Mecânico
-```bash
-cd braco_mecanico
-# Terminal 1
-python examples/exemplo_manipulador.py
-# Terminal 2
-python examples/exemplo_robo_movel.py
-```
-
-### Drone
-```bash
-cd drone
-python main.py
-```
-
-### Robô Aspirador
-```bash
-cd robo_aspirador
-# Primeira execução
-python main.py --execution 1
-# Execuções com aprendizado
-python main.py --execution 2 --load-map --map-file maps/map_exec_1.json
-```
-
-## 📁 Estrutura do Projeto
+Cada pasta contém o arquivo:
 
 ```
-PROJETO_ROBOTICA_N2/
-├── braco_mecanico/        # Parte 1a e 1b
-│   ├── src/               # Código fonte
-│   ├── examples/          # Exemplos de execução
-│   ├── node_red/         # Fluxo Node-RED
-│   └── README.md         # Documentação
-├── drone/                 # Parte 3
-│   ├── src/              # Código fonte
-│   ├── config/           # Configurações
-│   ├── node_red_complete.json
-│   └── README.md         # Documentação
-├── robo_aspirador/        # Parte 2
-│   ├── src/              # Código fonte
-│   ├── maps/             # Mapas gerados
-│   ├── node-red/         # Fluxo Node-RED
-│   └── README.md         # Documentação
-├── README.md             # Este arquivo
-├── GUIA_LIMPEZA_E_INICIO.md
-├── REVISAO_NODE_RED_ESPECIFICACAO.md
-└── iniciar_todos_projetos.bat
+node_red_flow.json
 ```
 
-## 📚 Documentação
+Basta importar no Node-RED.
 
-- **Guia Completo**: `GUIA_LIMPEZA_E_INICIO.md`
-- **Revisão Node-RED**: `REVISAO_NODE_RED_ESPECIFICACAO.md`
-- **Troubleshooting**: `TROUBLESHOOTING_DASHBOARD_VAZIO.md`
-- **Cada projeto**: Veja `README.md` dentro de cada pasta
+---
 
-## 🔧 Requisitos por Projeto
+# 📝 Licença e Créditos
 
-### Braço Mecânico
-- PyBullet >= 3.2.7
-- NumPy >= 1.20.0
-- paho-mqtt >= 1.6.0
-- Mosquitto MQTT Broker
-
-### Drone
-- PyBullet == 3.2.5
-- NumPy == 1.24.3
-- requests == 2.31.0
-- PyYAML == 6.0.1
-
-### Robô Aspirador
-- PyBullet >= 3.2.5
-- NumPy >= 1.21.0
-- requests >= 2.28.0
-
-## 🆘 Troubleshooting
-
-### Dashboards vazios
-- Verifique se os projetos estão executando
-- Verifique se Node-RED está rodando
-- Veja `TROUBLESHOOTING_DASHBOARD_VAZIO.md`
-
-### MQTT não conecta
-- Verifique Mosquitto: `sc query mosquitto`
-- Inicie: `net start mosquitto`
-
-### Node-RED não inicia
-- Verifique Node.js: `node --version`
-- Reinstale: `npm install -g node-red node-red-dashboard`
-
-## 📝 Notas Importantes
-
-- **Node-RED**: Uma única instância serve todos os projetos
-- **Mosquitto**: Necessário apenas para Braço Mecânico
-- **Dashboards**: Separados por abas, sem conflitos
-- **Portas**: Node-RED (1880), Mosquitto (1883)
-
-## 🎓 Conformidade com Especificação
-
-✅ **100% Conforme** - Todos os requisitos do documento de especificação foram implementados. Veja `REVISAO_NODE_RED_ESPECIFICACAO.md` para detalhes.
-
-## 📄 Licença
-
-Projeto educacional para fins acadêmicos.
-
+Projeto desenvolvido para fins educacionais como parte da avaliação de **Robótica (N2)**.
+Sinta-se à vontade para explorar, modificar e expandir.
