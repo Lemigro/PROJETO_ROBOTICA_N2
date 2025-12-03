@@ -92,10 +92,13 @@ class UltrasonicSensor:
         
         # Raycast para detectar obstáculos
         ray_from = robot_pos
+        
+        # CORREÇÃO: Adicionar um leve deslocamento em Z no destino do raio
+        # Isso evita que o raio bata no chão se o robô inclinar um pouco para frente ao frear
         ray_to = [
             robot_pos[0] + self.max_range * math.cos(angle),
             robot_pos[1] + self.max_range * math.sin(angle),
-            robot_pos[2]
+            robot_pos[2] + 0.05  # Levanta levemente a ponta do raio
         ]
         
         # Realizar raycast
@@ -103,10 +106,16 @@ class UltrasonicSensor:
         
         if hit[0][0] != -1:  # Colisão detectada
             hit_pos = hit[0][3]
-            distance = math.sqrt(
-                (hit_pos[0] - robot_pos[0])**2 +
-                (hit_pos[1] - robot_pos[1])**2
-            )
+            
+            # Filtro extra: Ignorar colisão se for o próprio chão (plane)
+            # Se bateu muito baixo, é chão/ruído - ignorar
+            if hit_pos[2] < 0.05:  # Muito baixo, provavelmente é o chão
+                distance = self.max_range
+            else:
+                distance = math.sqrt(
+                    (hit_pos[0] - robot_pos[0])**2 +
+                    (hit_pos[1] - robot_pos[1])**2
+                )
         else:
             distance = self.max_range
         
@@ -165,12 +174,13 @@ class RoboMovel:
         # Parâmetros do robô (inicializar antes de criar o robô)
         self.wheel_radius = 0.1  # Raio da roda (metros)
         self.base_width = 0.3   # Largura da base (metros)
-        self.max_velocity = 8.0  # Velocidade máxima linear (m/s) - aumentado como robô aspirador
-        self.max_angular_velocity = 10.0  # Velocidade angular máxima (rad/s)
+        self.max_velocity = 12.0  # Velocidade máxima linear (m/s) - aumentado para movimento mais rápido
+        self.max_angular_velocity = 15.0  # Velocidade angular máxima (rad/s) - aumentado para giros mais rápidos
         
         # Trajetórias
         self.reference_trajectory = []  # Trajetória de referência (ideal)
         self.actual_trajectory = []     # Trajetória real (com evasão)
+        self.current_trajectory_index = 0  # Índice do ponto atual na trajetória (sempre avança)
         self.compute_reference_trajectory()
         
         # Métricas (inicializar antes de criar o robô)
@@ -188,6 +198,12 @@ class RoboMovel:
         
         # Criar o robô
         self.create_robot()
+        
+        # Resetar índice da trajetória
+        self.current_trajectory_index = 0
+        
+        # Inicializar linha dos "olhos" do robô (visualização do foco no goal)
+        self.eyes_line_id = None
         
         # Sensores ultrassônicos - múltiplas direções para escaneamento
         self.sensors = {
@@ -272,6 +288,9 @@ class RoboMovel:
         # Garantir que está parado após estabilização
         p.resetBaseVelocity(self.robot_id, [0, 0, 0], [0, 0, 0])
         
+        # Resetar índice da trajetória
+        self.current_trajectory_index = 0
+        
         # Verificar e corrigir posição final
         pos, orn = p.getBasePositionAndOrientation(self.robot_id)
         # Se o robô se moveu durante estabilização, reposicionar
@@ -291,14 +310,93 @@ class RoboMovel:
         
     def compute_reference_trajectory(self):
         """Calcula a trajetória de referência (linha reta do start ao goal)"""
-        # Criar pontos ao longo da linha reta
+        # Criar pontos ao longo da linha reta do START para o GOAL
         num_points = 50
         for i in range(num_points + 1):
             t = i / num_points
+            # Garantir que vai do START para o GOAL (nunca ao contrário)
             x = self.start_point[0] + t * (self.goal_point[0] - self.start_point[0])
             y = self.start_point[1] + t * (self.goal_point[1] - self.start_point[1])
             z = self.start_point[2] + t * (self.goal_point[2] - self.start_point[2])
             self.reference_trajectory.append([x, y, z])
+        
+        # Garantir que o índice inicial está no início
+        self.current_trajectory_index = 0
+    
+    def draw_robot_eyes(self):
+        """
+        Desenha os 'olhos' do robô - uma linha amarela que aponta para o goal
+        A linha PARA quando encontra um obstáculo (não ultrapassa)
+        """
+        if not self.use_gui:
+            return
+        
+        # Limpar linha anterior
+        if self.eyes_line_id is not None:
+            try:
+                p.removeUserDebugItem(self.eyes_line_id)
+            except:
+                pass
+        
+        # Obter posição e orientação do robô
+        pos, orn = p.getBasePositionAndOrientation(self.robot_id)
+        
+        # Calcular direção para o goal
+        goal_dx = self.goal_point[0] - pos[0]
+        goal_dy = self.goal_point[1] - pos[1]
+        goal_dist = math.sqrt(goal_dx**2 + goal_dy**2)
+        
+        if goal_dist > 0.01:
+            goal_dir_x = goal_dx / goal_dist
+            goal_dir_y = goal_dy / goal_dist
+            
+            # Ponto inicial (centro do robô, ligeiramente acima)
+            start_point = [pos[0], pos[1], pos[2] + 0.15]
+            
+            # Fazer raycast para detectar obstáculos na direção do goal
+            # A linha para quando encontra um obstáculo
+            max_look_length = min(3.0, goal_dist)
+            ray_from = start_point
+            ray_to = [
+                pos[0] + goal_dir_x * max_look_length,
+                pos[1] + goal_dir_y * max_look_length,
+                pos[2] + 0.15
+            ]
+            
+            # Raycast para detectar obstáculos
+            hit = p.rayTest(ray_from, ray_to)
+            
+            if hit[0][0] != -1:  # Colisão detectada
+                hit_pos = hit[0][3]
+                # Calcular distância até o obstáculo
+                obstacle_dist = math.sqrt(
+                    (hit_pos[0] - pos[0])**2 + 
+                    (hit_pos[1] - pos[1])**2
+                )
+                # A linha para um pouco antes do obstáculo (0.2m de margem)
+                look_length = max(0.3, obstacle_dist - 0.2)
+            else:
+                # Sem obstáculo, linha vai até o goal ou 3.0m
+                look_length = max_look_length
+            
+            # Ponto final (na direção do goal, mas para antes de obstáculos)
+            end_point = [
+                pos[0] + goal_dir_x * look_length,
+                pos[1] + goal_dir_y * look_length,
+                pos[2] + 0.15
+            ]
+            
+            # Desenhar linha amarela brilhante
+            try:
+                self.eyes_line_id = p.addUserDebugLine(
+                    start_point,
+                    end_point,
+                    lineColorRGB=[1.0, 1.0, 0.0],  # Amarelo brilhante
+                    lineWidth=6,
+                    lifeTime=0.1  # Atualizar a cada frame
+                )
+            except:
+                pass
     
     def draw_trajectories(self):
         """Desenha as trajetórias visualmente"""
@@ -420,18 +518,108 @@ class RoboMovel:
         
         return readings
     
+    def find_gaps(self, sensor_readings: dict) -> List[dict]:
+        """
+        Identifica brechas/passagens entre obstáculos escaneando ao redor
+        
+        Returns:
+            Lista de brechas encontradas, ordenadas por qualidade (melhor primeiro)
+        """
+        pos, orn = p.getBasePositionAndOrientation(self.robot_id)
+        euler = p.getEulerFromQuaternion(orn)
+        current_yaw = euler[2]
+        
+        # Direção para o goal
+        dx = self.goal_point[0] - pos[0]
+        dy = self.goal_point[1] - pos[1]
+        goal_yaw = math.atan2(dy, dx)
+        
+        # Ângulos de cada direção de sensor (apenas à frente - nunca para trás)
+        directions = {
+            'front': 0.0,
+            'front_left': math.pi/4,
+            'front_right': -math.pi/4,
+            'left': math.pi/2,
+            'right': -math.pi/2
+        }
+        
+        gaps = []
+        
+        # Analisar pares de sensores adjacentes para encontrar brechas
+        # Brechas são espaços entre obstáculos onde o robô pode passar
+        sensor_pairs = [
+            ('front_left', 'front'),
+            ('front', 'front_right'),
+            ('left', 'front_left'),
+            ('front_right', 'right'),
+            ('front_left', 'left'),  # Brecha entre esquerda e frente-esquerda
+            ('front_right', 'right')  # Brecha entre direita e frente-direita
+        ]
+        
+        for dir1, dir2 in sensor_pairs:
+            if dir1 not in sensor_readings or dir2 not in sensor_readings:
+                continue
+            
+            dist1 = sensor_readings[dir1]
+            dist2 = sensor_readings[dir2]
+            
+            # Uma brecha existe se ambos os sensores mostram espaço suficiente
+            min_dist = min(dist1, dist2)
+            avg_dist = (dist1 + dist2) / 2.0
+            
+            # CONSIDERAR BRECHAS MENORES: Aceitar brechas mais estreitas para passar entre obstáculos
+            # Reduzir limite mínimo para 0.25m (robô tem ~0.3m de largura, então precisa de pelo menos 0.25m)
+            # E média de pelo menos 0.4m (brecha mínima para passar)
+            if min_dist > 0.25 and avg_dist > 0.4:
+                # Calcular direção média da brecha
+                angle1 = current_yaw + directions.get(dir1, 0.0)
+                angle2 = current_yaw + directions.get(dir2, 0.0)
+                gap_angle = (angle1 + angle2) / 2.0
+                
+                # Normalizar ângulo
+                gap_angle = math.atan2(math.sin(gap_angle), math.cos(gap_angle))
+                
+                # Erro angular em relação ao goal
+                error_to_goal = goal_yaw - gap_angle
+                error_to_goal = math.atan2(math.sin(error_to_goal), math.cos(error_to_goal))
+                
+                # Score da brecha baseado em:
+                # - Alinhamento com goal - MUITO IMPORTANTE (prioridade máxima)
+                # - Largura da brecha (avg_dist) - importante mas secundário
+                # - Distância mínima (garantir que passa) - importante
+                # PRIORIZAR brechas alinhadas com goal mesmo que sejam estreitas
+                alignment_score = (1.0 - abs(error_to_goal) / math.pi) * 10.0  # Alinhamento com goal (PRIORIDADE MÁXIMA)
+                width_score = avg_dist * 2.0  # Largura (importante mas secundária)
+                safety_score = min_dist * 1.5  # Segurança (garantir que passa)
+                
+                # Bônus extra se a brecha está diretamente na direção do goal
+                if abs(error_to_goal) < math.pi/6:  # Menos de 30° de diferença
+                    alignment_score *= 1.5  # Bônus de 50% para brechas muito alinhadas
+                
+                gap_score = alignment_score + width_score + safety_score
+                
+                gaps.append({
+                    'direction': f"{dir1}_{dir2}",
+                    'angle': gap_angle,
+                    'width': avg_dist,
+                    'min_distance': min_dist,
+                    'score': gap_score,
+                    'error_to_goal': error_to_goal
+                })
+        
+        # Ordenar brechas por score (melhor primeiro)
+        gaps.sort(key=lambda x: x['score'], reverse=True)
+        
+        return gaps
+    
     def scan_environment(self, sensor_readings: dict) -> dict:
         """
         Escaneia o ambiente e avalia qual direção é melhor para seguir
+        MELHORADO: Identifica brechas entre obstáculos ao invés de apenas evitar
         
         Returns:
             dict com informações sobre o melhor caminho
         """
-        # Avaliar cada direção considerando:
-        # 1. Espaço livre (distância até obstáculo)
-        # 2. Direção em relação ao goal
-        # 3. Custo de desvio
-        
         pos, orn = p.getBasePositionAndOrientation(self.robot_id)
         euler = p.getEulerFromQuaternion(orn)
         current_yaw = euler[2]
@@ -442,15 +630,30 @@ class RoboMovel:
         goal_yaw = math.atan2(dy, dx)
         goal_distance = math.sqrt(dx**2 + dy**2)
         
-        # Ângulos de cada direção de sensor
+        # Primeiro, tentar encontrar brechas (passagens entre obstáculos)
+        gaps = self.find_gaps(sensor_readings)
+        
+        # Se encontrou brechas, usar a melhor (ACEITAR BRECHAS MENORES)
+        if gaps and gaps[0]['min_distance'] > 0.25:
+            best_gap = gaps[0]
+            return {
+                'best_direction': 'gap',
+                'best_score': best_gap['score'],
+                'best_angle': best_gap['angle'],
+                'gap_info': best_gap,
+                'gaps': gaps,
+                'goal_yaw': goal_yaw,
+                'current_yaw': current_yaw
+            }
+        
+        # Se não encontrou brechas, usar lógica de evasão tradicional
+        # Mas SEMPRE priorizando direções à frente
         directions = {
             'front': 0.0,
             'front_left': math.pi/4,
             'front_right': -math.pi/4,
             'left': math.pi/2,
-            'right': -math.pi/2,
-            'back_left': 3*math.pi/4,
-            'back_right': -3*math.pi/4
+            'right': -math.pi/2
         }
         
         best_direction = None
@@ -473,23 +676,26 @@ class RoboMovel:
             
             # Score baseado em:
             # - Espaço livre (maior = melhor)
-            # - Alinhamento com goal (menor erro = melhor)
+            # - Alinhamento com goal (menor erro = melhor) - PRIORIDADE ALTA
             # - Penalizar direções muito desalinhadas
             
             space_score = distance  # Quanto mais espaço, melhor
-            alignment_score = 1.0 - abs(error_to_goal) / math.pi  # Quanto mais alinhado, melhor
+            alignment_score = (1.0 - abs(error_to_goal) / math.pi) * 5.0  # Aumentado para priorizar goal
             distance_bonus = 1.0 / (1.0 + goal_distance * 0.1)  # Bônus se goal está longe
             
-            # Score combinado (prioriza espaço, mas considera goal)
+            # Score combinado (prioriza alinhamento com goal)
             if distance < 0.3:
-                # Muito próximo - score muito baixo
-                score = -10.0
-            elif distance < 0.8:
-                # Próximo - score baixo, mas ainda possível
-                score = space_score * 0.3 + alignment_score * 0.2
+                # Muito próximo - score muito baixo, mas ainda possível se for direção do goal
+                if abs(error_to_goal) < math.pi / 6:  # Se está alinhado com goal (30°)
+                    score = space_score * 0.5 + alignment_score * 0.5  # Ainda tenta
+                else:
+                    score = -10.0
+            elif distance < 0.6:
+                # Próximo - score baseado principalmente em alinhamento
+                score = space_score * 0.2 + alignment_score * 0.8
             else:
                 # Espaço suficiente - score baseado em espaço e alinhamento
-                score = space_score * 0.6 + alignment_score * 0.4 + distance_bonus * 0.1
+                score = space_score * 0.4 + alignment_score * 0.6 + distance_bonus * 0.1
             
             direction_scores[dir_name] = {
                 'score': score,
@@ -507,7 +713,8 @@ class RoboMovel:
             'best_score': best_score,
             'scores': direction_scores,
             'goal_yaw': goal_yaw,
-            'current_yaw': current_yaw
+            'current_yaw': current_yaw,
+            'gaps': gaps
         }
     
     def check_collision(self) -> bool:
@@ -520,6 +727,120 @@ class RoboMovel:
                 return True
         
         return False
+    
+    def get_closest_point_on_trajectory(self, current_pos: List[float], look_ahead: float = 0.8) -> Tuple[List[float], int]:
+        """
+        Encontra o ponto alvo na trajetória de referência.
+        CORREÇÃO: Busca o ponto mais próximo globalmente no segmento futuro para evitar ficar preso.
+        Isso resolve o problema do "Waypoint Esquecido" onde o robô dava meia-volta.
+        
+        Args:
+            current_pos: Posição atual do robô [x, y, z]
+            look_ahead: Distância à frente para buscar o ponto alvo (m)
+            
+        Returns:
+            (target_point, closest_idx): Ponto alvo na trajetória e índice do ponto mais próximo
+        """
+        if not self.reference_trajectory:
+            return self.goal_point, 0
+        
+        # 1. Encontrar o ponto da trajetória mais próximo da posição ATUAL do robô
+        # Procuramos num horizonte de índices para otimizar (ex: verificar os próximos 50 pontos)
+        # Se o robô avançou muito, isso vai "pular" os pontos que ficaram para trás
+        closest_dist = float('inf')
+        closest_idx = self.current_trajectory_index
+        
+        # Otimização: Procura apenas até 50 pontos à frente ou até o fim
+        # Mas sempre a partir do índice atual (nunca volta muito)
+        search_start = max(0, self.current_trajectory_index - 5)  # Permitir pequeno retrocesso se necessário
+        search_end = min(len(self.reference_trajectory), self.current_trajectory_index + 50)
+        
+        for i in range(search_start, search_end):
+            p_traj = self.reference_trajectory[i]
+            # Distância Euclidiana ignorando Z
+            d = (p_traj[0] - current_pos[0])**2 + (p_traj[1] - current_pos[1])**2
+            # Bônus para pontos à frente do índice atual (prioriza avanço)
+            if i >= self.current_trajectory_index:
+                d *= 0.9  # 10% de bônus para pontos à frente
+            if d < closest_dist:
+                closest_dist = d
+                closest_idx = i
+        
+        # Garantir que nunca volta muito (máximo 5 pontos para trás)
+        if closest_idx < self.current_trajectory_index - 5:
+            closest_idx = self.current_trajectory_index
+        
+        # Atualiza o índice atual para o mais próximo encontrado
+        # Isso garante que se o robô passou do ponto, o índice avança junto
+        self.current_trajectory_index = closest_idx
+        
+        # 2. Aplicar o Look-Ahead (Olhar à frente)
+        # A partir do ponto mais próximo, projeta uma distância à frente para suavizar a curva
+        target_idx = closest_idx
+        accumulated_dist = 0.0
+        
+        for i in range(closest_idx, len(self.reference_trajectory) - 1):
+            p1 = self.reference_trajectory[i]
+            p2 = self.reference_trajectory[i + 1]
+            segment_dist = math.sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
+            accumulated_dist += segment_dist
+            
+            if accumulated_dist >= look_ahead:
+                target_idx = i + 1
+                break
+        
+        # Se chegou ao fim da lista
+        if target_idx >= len(self.reference_trajectory):
+            return self.goal_point, len(self.reference_trajectory) - 1
+            
+        return self.reference_trajectory[target_idx], self.current_trajectory_index
+    
+    def get_direction_to_trajectory(self) -> float:
+        """Retorna o ângulo necessário para seguir a trajetória de referência"""
+        try:
+            pos, orn = p.getBasePositionAndOrientation(self.robot_id)
+            euler = p.getEulerFromQuaternion(orn)
+            current_yaw = euler[2]
+            
+            # Calcular direção para o goal primeiro (para verificação)
+            goal_dx = self.goal_point[0] - pos[0]
+            goal_dy = self.goal_point[1] - pos[1]
+            goal_yaw = math.atan2(goal_dy, goal_dx)
+            
+            # Encontrar ponto alvo na trajetória (sempre à frente)
+            target_point, _ = self.get_closest_point_on_trajectory(pos, look_ahead=0.8)
+            
+            # Direção para o ponto alvo na trajetória
+            dx = target_point[0] - pos[0]
+            dy = target_point[1] - pos[1]
+            
+            dist_to_target = math.sqrt(dx**2 + dy**2)
+            if dist_to_target < 0.1:
+                # Muito próximo do ponto alvo, usar goal
+                return self.get_direction_to_goal()
+            
+            target_yaw = math.atan2(dy, dx)
+            
+            # VERIFICAÇÃO CRÍTICA: Se a direção da trajetória está muito diferente do goal (> 45°),
+            # usar goal diretamente para evitar ir na direção errada
+            angle_diff = abs(target_yaw - goal_yaw)
+            angle_diff = min(angle_diff, 2 * math.pi - angle_diff)  # Normalizar para [0, pi]
+            
+            if angle_diff > math.pi / 4:  # Mais de 45° de diferença
+                # Trajetória está apontando na direção errada, usar goal
+                return self.get_direction_to_goal()
+            
+            # Erro angular (normalizar para [-pi, pi])
+            error_yaw = target_yaw - current_yaw
+            error_yaw = math.atan2(math.sin(error_yaw), math.cos(error_yaw))
+            
+            # VERIFICAÇÃO DE SEGURANÇA: Se o erro é muito grande (> 90°), usar goal diretamente
+            if abs(error_yaw) > math.pi / 2:
+                return self.get_direction_to_goal()
+            
+            return error_yaw
+        except:
+            return self.get_direction_to_goal()  # Fallback para goal
     
     def get_direction_to_goal(self) -> float:
         """Retorna o ângulo necessário para ir em direção ao goal"""
@@ -544,196 +865,130 @@ class RoboMovel:
             error_yaw = goal_yaw - current_yaw
             error_yaw = math.atan2(math.sin(error_yaw), math.cos(error_yaw))
             
+            # DEBUG: Verificar se está indo na direção errada
+            # Se o erro é muito grande (> 135°), pode estar invertido
+            if abs(error_yaw) > 3 * math.pi / 4:
+                # Erro muito grande, verificar se precisa inverter
+                # Se o erro está próximo de 180°, significa que está olhando na direção oposta
+                if abs(error_yaw) > math.pi - 0.1:
+                    # Está olhando na direção oposta, corrigir
+                    error_yaw = error_yaw - math.pi if error_yaw > 0 else error_yaw + math.pi
+            error_yaw = math.atan2(math.sin(error_yaw), math.cos(error_yaw))
+            
             return error_yaw
         except:
             return 0.0  # Retornar zero em caso de erro
     
     def compute_velocities(self, sensor_readings: dict, dt: float) -> Tuple[float, float]:
         """
-        Calcula as velocidades linear e angular baseado no escaneamento do ambiente
-        Retorna (velocidade_linear, velocidade_angular) em m/s e rad/s
-        
-        Args:
-            sensor_readings: Leituras dos sensores
-            dt: Intervalo de tempo
-            
-        Returns:
-            (velocidade_linear, velocidade_angular) em m/s e rad/s
+        LÓGICA ULTRA SIMPLES: SEMPRE seguir a visão (goal)
+        Só desviar se obstáculo muito próximo, mas sempre mantendo direção do goal
         """
-        # Escanear ambiente para encontrar melhor direção
-        scan_result = self.scan_environment(sensor_readings)
-        
-        # Distâncias principais (para compatibilidade)
+        # Ler sensores
         dist_front = sensor_readings.get('front', 2.0)
         dist_left = sensor_readings.get('left', 2.0)
         dist_right = sensor_readings.get('right', 2.0)
         dist_front_left = sensor_readings.get('front_left', 2.0)
         dist_front_right = sensor_readings.get('front_right', 2.0)
         
-        # Velocidade base (avançar)
-        base_velocity = 3.0
+        # Posição e orientação
+        pos, orn = p.getBasePositionAndOrientation(self.robot_id)
+        euler = p.getEulerFromQuaternion(orn)
+        current_yaw = euler[2]
         
-        # Verificar se há obstáculo muito próximo (emergência)
-        min_distance = min(dist_front, dist_left, dist_right, dist_front_left, dist_front_right)
+        # Direção para o goal (SEGUIR A VISÃO - linha amarela)
+        goal_dx = self.goal_point[0] - pos[0]
+        goal_dy = self.goal_point[1] - pos[1]
+        goal_yaw = math.atan2(goal_dy, goal_dx)
+        error_yaw_goal = goal_yaw - current_yaw
+        error_yaw_goal = math.atan2(math.sin(error_yaw_goal), math.cos(error_yaw_goal))
         
-        # Verificar distância ao goal
-        pos, _ = p.getBasePositionAndOrientation(self.robot_id)
-        dist_to_goal = math.sqrt(
-            (pos[0] - self.goal_point[0])**2 + 
-            (pos[1] - self.goal_point[1])**2
-        )
-        
-        # Se muito próximo do goal, ignorar obstáculos e ir direto
-        if dist_to_goal < 0.5:
-            error_yaw = self.get_direction_to_goal()
-            angular_correction = self.path_controller.compute(error_yaw, dt)
-            angular_correction = np.clip(angular_correction, -1.5, 1.5)
-            base_velocity = 2.0  # Velocidade reduzida quando próximo do goal
-            vel_left = base_velocity - angular_correction
-            vel_right = base_velocity + angular_correction
-            linear_velocity = (vel_left + vel_right) * self.wheel_radius / 2.0
-            angular_velocity = (vel_right - vel_left) * self.wheel_radius / self.base_width
-            linear_velocity = np.clip(linear_velocity, -self.max_velocity, self.max_velocity)
-            angular_velocity = np.clip(angular_velocity, -self.max_angular_velocity, self.max_angular_velocity)
-            return linear_velocity, angular_velocity
-        
-        # Verificar se há obstáculo muito próximo (preso)
-        very_close = min_distance < 0.3
-        
-        if very_close:
-            # Modo de emergência: dar ré e virar, MAS sempre considerando goal
-            if dist_front < 0.3:
-                # Muito próximo na frente - dar ré e virar
-                base_velocity = -1.5  # Ré
-                
-                # Calcular direção para o goal (mesmo dando ré, queremos ir na direção certa)
-                error_yaw = self.get_direction_to_goal()
-                goal_turn = self.path_controller.compute(error_yaw, dt) * 0.2  # 20% seguir goal
-                
-                # Virar na direção com mais espaço (evasão)
-                if dist_left > dist_right:
-                    # Mais espaço à esquerda, virar à esquerda
-                    evasao_turn = 1.5  # Correção de evasão
-                else:
-                    # Mais espaço à direita, virar à direita
-                    evasao_turn = -1.5  # Correção de evasão
-                
-                # Combinar: 80% evasão, 20% seguir goal
-                total_turn = 0.8 * evasao_turn + 0.2 * goal_turn
-                
-                vel_left = base_velocity * (1.0 - total_turn * 0.5)
-                vel_right = base_velocity * (1.0 + total_turn * 0.5)
-            else:
-                # Muito próximo nas laterais - virar agressivamente MAS considerando goal
-                base_velocity = 1.0  # Reduzido para evitar colisão
-                
-                # Calcular direção para o goal
-                error_yaw = self.get_direction_to_goal()
-                goal_turn = self.path_controller.compute(error_yaw, dt) * 0.3  # 30% seguir goal
-                
-                # Evasão agressiva
-                if dist_left < dist_right:
-                    # Obstáculo à esquerda, virar à direita
-                    evasao_turn = 1.8
-                else:
-                    # Obstáculo à direita, virar à esquerda
-                    evasao_turn = -1.8
-                
-                # Combinar: 70% evasão, 30% seguir goal
-                total_turn = 0.7 * evasao_turn + 0.3 * goal_turn
-                
-                vel_left = base_velocity * (1.0 - total_turn)
-                vel_right = base_velocity * (1.0 + total_turn)
-        elif min_distance < 0.8:
-            # Obstáculo próximo - usar escaneamento para escolher melhor direção
-            base_velocity = 2.0  # Reduzir velocidade quando próximo
-            
-            # Usar a melhor direção encontrada no escaneamento
-            best_dir = scan_result['best_direction']
-            best_info = scan_result['scores'][best_dir]
-            
-            # Calcular correção angular para ir na melhor direção
-            target_angle = best_info['angle']
-            current_yaw = scan_result['current_yaw']
-            error_angle = target_angle - current_yaw
-            error_angle = math.atan2(math.sin(error_angle), math.cos(error_angle))
-            
-            # Controlador para seguir a melhor direção
-            angular_correction = self.path_controller.compute(error_angle, dt)
-            angular_correction = np.clip(angular_correction, -1.5, 1.5)
-            
-            # Reduzir velocidade se muito próximo
-            if min_distance < 0.5:
-                base_velocity *= 0.6
-            
-            vel_left = base_velocity - angular_correction
-            vel_right = base_velocity + angular_correction
-        elif min_distance < 1.5:
-            # Obstáculo moderado - usar escaneamento para escolher caminho otimizado
-            base_velocity = 2.5
-            
-            # Usar melhor direção do escaneamento, mas com mais peso no goal
-            best_dir = scan_result['best_direction']
-            best_info = scan_result['scores'][best_dir]
-            
-            # Calcular direção para o goal
-            error_yaw = self.get_direction_to_goal()
-            
-            # Calcular correção para melhor direção (60%) e goal (40%)
-            target_angle = best_info['angle']
-            current_yaw = scan_result['current_yaw']
-            error_best = target_angle - current_yaw
-            error_best = math.atan2(math.sin(error_best), math.cos(error_best))
-            
-            best_correction = self.path_controller.compute(error_best, dt) * 0.6
-            goal_correction = self.path_controller.compute(error_yaw, dt) * 0.4
-            
-            total_correction = best_correction + goal_correction
-            total_correction = np.clip(total_correction, -1.2, 1.2)
-            
-            # Atualizar métricas
-            error_lateral = dist_left - dist_right
-            self.metrics['erro_medio_lateral'].append(abs(error_lateral))
-            
-            # Reduzir velocidade se muito próximo
-            if dist_front < 1.0:
-                base_velocity *= 0.7
-            
-            vel_left = base_velocity - total_correction
-            vel_right = base_velocity + total_correction
+        # PROTEÇÃO ABSOLUTA: Se erro > 90°, forçar correção direta
+        # NUNCA permitir dar a volta
+        if abs(error_yaw_goal) > math.pi / 2:
+            total_turn = self.path_controller.compute(error_yaw_goal, dt) * 2.5
+            base_velocity = 2.0  # Muito lento para corrigir
         else:
-            # Sem obstáculos próximos - seguir em direção ao goal
-            error_yaw = self.get_direction_to_goal()
+            # Verificar obstáculo na frente
+            min_dist = min(dist_front, dist_front_left, dist_front_right)
             
-            # Controlador para seguir a direção do goal
-            angular_correction = self.path_controller.compute(error_yaw, dt)
-            angular_correction = np.clip(angular_correction, -1.5, 1.5)
-            
-            # Velocidades para seguir a direção (aumentar velocidade quando seguro)
-            # Ajustar velocidade baseada na distância ao goal
-            pos, _ = p.getBasePositionAndOrientation(self.robot_id)
-            dist_to_goal = math.sqrt(
-                (pos[0] - self.goal_point[0])**2 + 
-                (pos[1] - self.goal_point[1])**2
-            )
-            
-            # Velocidade proporcional à distância (mais rápido quando longe, mais devagar quando perto)
-            if dist_to_goal > 3.0:
-                base_velocity = 4.5  # Máxima quando longe
-            elif dist_to_goal > 1.5:
-                base_velocity = 4.0  # Alta quando médio
+            # Se há obstáculo muito próximo na frente, procurar brecha
+            if min_dist < 0.4:
+                # Procurar brechas (espaços entre sensores)
+                gaps = []
+                
+                # Brecha entre front_left e front
+                if dist_front_left > 0.3 and dist_front > 0.3:
+                    gap_angle = current_yaw + math.pi/12
+                    gap_error_to_goal = abs(goal_yaw - gap_angle)
+                    gap_error_to_goal = min(gap_error_to_goal, 2*math.pi - gap_error_to_goal)
+                    if gap_error_to_goal < math.pi/2:  # Brecha não muito afastada do goal
+                        gaps.append((gap_angle, min(dist_front_left, dist_front), gap_error_to_goal))
+                
+                # Brecha entre front e front_right
+                if dist_front > 0.3 and dist_front_right > 0.3:
+                    gap_angle = current_yaw - math.pi/12
+                    gap_error_to_goal = abs(goal_yaw - gap_angle)
+                    gap_error_to_goal = min(gap_error_to_goal, 2*math.pi - gap_error_to_goal)
+                    if gap_error_to_goal < math.pi/2:
+                        gaps.append((gap_angle, min(dist_front, dist_front_right), gap_error_to_goal))
+                
+                if gaps:
+                    # Encontrou brecha - IR EM DIREÇÃO A ELA
+                    best_gap = min(gaps, key=lambda x: x[2])  # Mais alinhada com goal
+                    gap_angle = best_gap[0]
+                    gap_error = gap_angle - current_yaw
+                    gap_error = math.atan2(math.sin(gap_error), math.cos(gap_error))
+                    
+                    # 70% brecha + 30% goal - ir em direção à brecha
+                    gap_turn = self.path_controller.compute(gap_error, dt) * 0.7
+                    goal_turn = self.path_controller.compute(error_yaw_goal, dt) * 0.3
+                    total_turn = gap_turn + goal_turn
+                    base_velocity = 5.0
+                else:
+                    # Sem brechas - desviar MÍNIMO mantendo direção do goal
+                    if error_yaw_goal > 0:  # Goal à esquerda
+                        evasao = 0.3 if dist_left > dist_right else 0.1
+                    else:  # Goal à direita
+                        evasao = -0.3 if dist_right > dist_left else -0.1
+                    
+                    # 95% goal + 5% evasão - quase direto ao goal
+                    goal_turn = self.path_controller.compute(error_yaw_goal, dt) * 0.95
+                    evasao_turn = evasao * 0.05
+                    total_turn = goal_turn + evasao_turn
+                    base_velocity = 4.0
+            elif min_dist < 0.7:
+                # Obstáculo próximo - pequena correção
+                if dist_left > dist_right:
+                    evasao = 0.15
+                else:
+                    evasao = -0.15
+                
+                # 98% goal + 2% evasão - quase direto
+                goal_turn = self.path_controller.compute(error_yaw_goal, dt) * 0.98
+                evasao_turn = evasao * 0.02
+                total_turn = goal_turn + evasao_turn
+                base_velocity = 6.0
             else:
-                base_velocity = 3.0  # Reduzida quando perto
-            
-            vel_left = base_velocity - angular_correction
-            vel_right = base_velocity + angular_correction
+                # SEM OBSTÁCULOS - SEGUIR VISÃO DIRETO (100% GOAL)
+                total_turn = self.path_controller.compute(error_yaw_goal, dt)
+                base_velocity = 7.0
         
-        # Converter velocidades das rodas para velocidade linear e angular
+        # Atualizar métricas
+        error_lateral = dist_left - dist_right
+        self.metrics['erro_medio_lateral'].append(abs(error_lateral))
+        
+        # Calcular velocidades
+        total_turn = np.clip(total_turn, -2.0, 2.0)
+        vel_left = base_velocity - total_turn
+        vel_right = base_velocity + total_turn
+        
         linear_velocity = (vel_left + vel_right) * self.wheel_radius / 2.0
         angular_velocity = (vel_right - vel_left) * self.wheel_radius / self.base_width
         
-        # Limitar velocidades
-        linear_velocity = np.clip(linear_velocity, -self.max_velocity, self.max_velocity)
+        # Sempre ir para frente
+        linear_velocity = abs(linear_velocity)
+        linear_velocity = np.clip(linear_velocity, 0, self.max_velocity)
         angular_velocity = np.clip(angular_velocity, -self.max_angular_velocity, self.max_angular_velocity)
         
         return linear_velocity, angular_velocity
@@ -751,11 +1006,9 @@ class RoboMovel:
         linear_desired = linear_velocity
         angular_desired = angular_velocity
         
-        # Limitar velocidades
-        max_linear = 8.0  # m/s (aumentado para movimento mais rápido)
-        max_angular = 10.0  # rad/s
-        linear_desired = np.clip(linear_desired, -max_linear, max_linear)
-        angular_desired = np.clip(angular_desired, -max_angular, max_angular)
+        # Limitar velocidades usando os valores máximos da classe
+        linear_desired = np.clip(linear_desired, -self.max_velocity, self.max_velocity)
+        angular_desired = np.clip(angular_desired, -self.max_angular_velocity, self.max_angular_velocity)
         
         # Obter estado atual
         pos, orn = p.getBasePositionAndOrientation(self.robot_id)
@@ -779,11 +1032,11 @@ class RoboMovel:
         error_y = target_vel_y - current_vel_y
         error_angular = target_angular_z - current_angular_z
         
-        # Ganhos do controlador (similar ao robô aspirador, mas mais suaves)
-        kp_linear = 100.0  # Ganho proporcional linear (reduzido para movimento mais suave)
-        kd_linear = 15.0   # Amortecimento linear (aumentado para evitar oscilações)
-        kp_angular = 70.0  # Ganho proporcional angular (reduzido)
-        kd_angular = 12.0  # Amortecimento angular (aumentado)
+        # Ganhos do controlador (aumentados para movimento mais rápido e responsivo)
+        kp_linear = 150.0  # Ganho proporcional linear (aumentado para resposta mais rápida)
+        kd_linear = 20.0   # Amortecimento linear (ajustado)
+        kp_angular = 100.0  # Ganho proporcional angular (aumentado)
+        kd_angular = 15.0  # Amortecimento angular (ajustado)
         kp_orientation = 100.0  # Ganho para manter plano
         
         # Calcular forças (termo proporcional + derivativo)
@@ -795,9 +1048,9 @@ class RoboMovel:
         torque_roll = -roll * kp_orientation
         torque_pitch = -pitch * kp_orientation
         
-        # Limitar forças e torques
-        max_force = 400.0
-        max_torque = 200.0
+        # Limitar forças e torques (aumentados para movimento mais rápido)
+        max_force = 600.0  # Aumentado de 400.0
+        max_torque = 300.0  # Aumentado de 200.0
         max_torque_orientation = 500.0
         
         force_x = np.clip(force_x, -max_force, max_force)
@@ -903,6 +1156,13 @@ class RoboMovel:
             # Atualizar métricas
             self.update_metrics()
             
+            # Desenhar "olhos" do robô (linha amarela apontando para o goal)
+            if self.use_gui:
+                try:
+                    self.draw_robot_eyes()
+                except:
+                    pass  # Ignorar erros de desenho
+            
             # Passo de simulação
             p.stepSimulation()
             
@@ -922,7 +1182,7 @@ class RoboMovel:
                 raise KeyboardInterrupt("Erro crítico na simulação")
             return {}, (0.0, 0.0)
     
-    def run_simulation(self, duration: float = 60.0):
+    def run_simulation(self, duration: float = 120.0):
         """Executa a simulação"""
         start_time = time.time()
         step_count = 0
@@ -935,8 +1195,11 @@ class RoboMovel:
         # Aguardar um pouco mais para garantir estabilização completa
         if self.use_gui:
             for _ in range(30):
-                p.stepSimulation()
-                time.sleep(0.01)
+                try:
+                    p.stepSimulation()
+                    time.sleep(0.01)
+                except:
+                    break
         
         try:
             while time.time() - start_time < duration and not goal_reached:
@@ -980,23 +1243,31 @@ class RoboMovel:
                 step_count += 1
                 
                 if self.use_gui:
-                    time.sleep(dt)
+                    try:
+                        time.sleep(dt)
+                    except:
+                        pass
+                        
         except KeyboardInterrupt:
-            print("\nSimulação interrompida")
+            print("\nSimulação interrompida pelo usuário")
         except Exception as e:
-            print(f"\nErro crítico na simulação: {e}")
+            print(f"\nErro na simulação: {e}")
             import traceback
             traceback.print_exc()
-        
-        if goal_reached:
-            print("\n✓ Goal alcançado!")
-        else:
-            print("\nTempo limite atingido")
-        
-        # Enviar métricas finais
-        self.send_metrics_to_node_red()
-        print("\n=== Métricas Finais ===")
-        print(self.get_metrics())
+        finally:
+            # Sempre tentar enviar métricas finais e limpar
+            try:
+                if goal_reached:
+                    print("\n✓ Goal alcançado!")
+                else:
+                    print("\nTempo limite atingido")
+                
+                # Enviar métricas finais
+                self.send_metrics_to_node_red()
+                print("\n=== Métricas Finais ===")
+                print(self.get_metrics())
+            except:
+                pass
     
     def cleanup(self):
         """Limpa recursos"""
@@ -1010,15 +1281,23 @@ class RoboMovel:
 
 def main():
     """Função principal"""
-    robo = RoboMovel(use_gui=True)
-    
+    robo = None
     try:
-        # Executar simulação por 30 segundos
-        robo.run_simulation(duration=30.0)
+        robo = RoboMovel(use_gui=True)
+        # Executar simulação por 120 segundos (tempo suficiente)
+        robo.run_simulation(duration=120.0)
     except KeyboardInterrupt:
         print("\nSimulação interrompida pelo usuário")
+    except Exception as e:
+        print(f"\nErro fatal: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
-        robo.cleanup()
+        if robo is not None:
+            try:
+                robo.cleanup()
+            except:
+                pass
 
 
 if __name__ == "__main__":

@@ -293,15 +293,51 @@ class SimulationLogger:
         }
     
     def _calculate_efficiency(self) -> float:
-        """Calcula eficiência (razão entre distância percorrida e ideal)."""
-        # Simplificação: eficiência baseada em número de replanejamentos
-        # Quanto menos replanejamentos, mais eficiente
+        """
+        Calcula eficiência baseada em múltiplos fatores:
+        1. Distância percorrida vs distância ideal (peso: 70%)
+        2. Número de replanejamentos (peso: 20%)
+        3. Tempo de execução (peso: 10%)
+        """
         if self.metrics['points_delivered'] == 0:
             return 0.0
         
-        # Eficiência ideal seria 1.0 (sem replanejamentos desnecessários)
-        replan_penalty = min(self.metrics['replan_count'] / max(self.metrics['points_delivered'], 1), 1.0)
-        return 1.0 - replan_penalty * 0.3  # Penalidade máxima de 30%
+        # 1. Eficiência de distância (70% do peso)
+        # Estima distância ideal: média de 5m entre pontos (configuração padrão)
+        # Distância ideal = número de pontos * distância média entre pontos
+        num_points = self.metrics['points_delivered']
+        estimated_ideal_distance = num_points * 5.0  # 5m entre pontos (configuração padrão)
+        
+        # Se não há distância percorrida, eficiência é 0
+        if self.metrics['total_distance'] == 0:
+            distance_efficiency = 0.0
+        else:
+            # Eficiência = distância ideal / distância real (limitado a 1.0)
+            distance_efficiency = min(estimated_ideal_distance / self.metrics['total_distance'], 1.0)
+        
+        # 2. Eficiência de replanejamento (20% do peso)
+        # Penalidade por replanejamento: cada replanejamento reduz eficiência em 2%
+        replan_ratio = self.metrics['replan_count'] / max(num_points, 1)
+        replan_efficiency = max(1.0 - replan_ratio * 0.5, 0.5)  # Mínimo 50% mesmo com muitos replanejamentos
+        
+        # 3. Eficiência de tempo (10% do peso)
+        # Tempo ideal estimado: 2s por ponto (configuração padrão)
+        elapsed_time = time.time() - self.metrics['start_time']
+        estimated_ideal_time = num_points * 2.0
+        if elapsed_time == 0:
+            time_efficiency = 0.0
+        else:
+            time_efficiency = min(estimated_ideal_time / elapsed_time, 1.0)
+        
+        # Eficiência total: média ponderada
+        total_efficiency = (
+            distance_efficiency * 0.70 +  # 70% peso na distância
+            replan_efficiency * 0.20 +    # 20% peso em replanejamentos
+            time_efficiency * 0.10         # 10% peso no tempo
+        )
+        
+        # Garantir que eficiência está entre 0 e 1
+        return max(0.0, min(1.0, total_efficiency))
     
     def close(self):
         """Fecha o logger e salva métricas finais."""

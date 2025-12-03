@@ -17,11 +17,7 @@ Simulação de drone de entregas usando PyBullet com planejamento dinâmico de r
 
 ```bash
 # Instalar dependências
-pip install -r requirements.txt
-
-# Testar instalação
-python test_simple.py
-```
+pip install -r config/requirements.txt
 
 ### Executar
 

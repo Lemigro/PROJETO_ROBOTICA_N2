@@ -152,22 +152,42 @@ class DroneController:
         force_x = np.clip(force_x, -max_horizontal_force, max_horizontal_force)
         force_y = np.clip(force_y, -max_horizontal_force, max_horizontal_force)
         
-        # Controle de atitude para orientar o drone na direção desejada
-        # Simplificação: calculamos roll e pitch baseados na direção desejada
-        if np.linalg.norm(desired_velocity[:2]) > 0.1:
+        # CORREÇÃO: Controle de atitude melhorado - sempre tenta manter drone plano
+        # Quando não há movimento significativo, força roll e pitch a zero
+        if np.linalg.norm(desired_velocity[:2]) > 0.2:
+            # Há movimento: permite inclinação leve para direção do movimento
             direction = desired_velocity[:2] / np.linalg.norm(desired_velocity[:2])
-            desired_roll = -direction[1] * 0.3  # Inclinação lateral
-            desired_pitch = direction[0] * 0.3   # Inclinação frontal
+            desired_roll = -direction[1] * 0.15  # CORREÇÃO: Inclinação reduzida (0.15 ao invés de 0.3)
+            desired_pitch = direction[0] * 0.15   # CORREÇÃO: Inclinação reduzida
         else:
+            # Sem movimento: força roll e pitch a zero para manter plano
             desired_roll = 0.0
             desired_pitch = 0.0
         
-        # Atitude desejada (manter yaw atual)
-        desired_attitude = np.array([desired_roll, desired_pitch, current_attitude[2]])
+        # CORREÇÃO: Yaw FIXO - não rotaciona, mantém orientação inicial
+        # O drone não precisa rotacionar para se mover, pode usar forças horizontais
+        desired_yaw = current_attitude[2]  # SEMPRE mantém yaw atual (não muda)
+        
+        # Atitude desejada
+        desired_attitude = np.array([desired_roll, desired_pitch, desired_yaw])
         att_error = desired_attitude - current_attitude
+        
+        # CORREÇÃO: Normaliza erro de yaw
+        while att_error[2] > np.pi:
+            att_error[2] -= 2 * np.pi
+        while att_error[2] < -np.pi:
+            att_error[2] += 2 * np.pi
         
         # Controle de atitude
         torque = self.attitude_pid.update(att_error, dt)
+        
+        # CORREÇÃO: Zera torque de yaw para evitar rotação no próprio eixo
+        # O torque de yaw será corrigido no apply_control com amortecimento
+        torque[2] = 0.0  # SEMPRE zera torque de yaw do PID (não rotaciona)
+        
+        # CORREÇÃO: Limita torque para evitar rotações descontroladas
+        max_torque = 15.0  # Limite de torque
+        torque = np.clip(torque, -max_torque, max_torque)
         
         # Força vertical (thrust) baseado na altitude desejada
         # Controle simples e direto

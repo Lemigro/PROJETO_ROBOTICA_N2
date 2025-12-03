@@ -139,11 +139,12 @@ class VacuumRobot:
         error_y = target_vel_y - current_vel_y
         error_angular = target_angular_z - current_angular_z
         
-        # Ganhos do controlador (aumentados para movimento muito mais rápido)
-        kp_linear = 150.0  # Aumentado de 80.0 para movimento extremamente rápido
-        kd_linear = 15.0   # Amortecimento aumentado
-        kp_angular = 100.0  # Aumentado de 60.0
-        kd_angular = 12.0   # Amortecimento aumentado
+        # Ganhos do controlador (ajustados para movimento muito mais fluido)
+        # Similar ao robô móvel para consistência
+        kp_linear = 150.0  # Mantido para movimento rápido
+        kd_linear = 25.0   # Aumentado ainda mais para movimento mais suave
+        kp_angular = 100.0  # Mantido
+        kd_angular = 18.0   # Aumentado ainda mais para rotação mais suave
         
         # Obtém orientação atual e corrige se necessário (mantém robô plano)
         _, quat = p.getBasePositionAndOrientation(self.robot_id)
@@ -264,6 +265,37 @@ class VacuumRobot:
         linear, angular = self.velocity
         power = abs(linear) * 10 + abs(angular) * 5  # watts (estimativa)
         self.energy_consumed += power * dt
+    
+    def draw_robot_vision(self, look_length=1.5):
+        """
+        Desenha uma linha visual simples (olhos) mostrando a direção do robô
+        Versão simplificada e mais clara
+        
+        Args:
+            look_length: Comprimento da linha visual em metros (reduzido para menos confusão)
+        """
+        pos, quat = p.getBasePositionAndOrientation(self.robot_id)
+        euler = p.getEulerFromQuaternion(quat)
+        yaw = euler[2]
+        
+        # Ponto inicial (centro do robô, mais alto para ficar visível)
+        start_point = [pos[0], pos[1], pos[2] + 0.08]
+        
+        # Direção do robô (frente) - linha mais curta e simples
+        end_point = [
+            pos[0] + look_length * math.cos(yaw),
+            pos[1] + look_length * math.sin(yaw),
+            pos[2] + 0.08
+        ]
+        
+        # Desenha linha verde (mais visível que amarelo) - sem raycast para simplicidade
+        p.addUserDebugLine(
+            start_point,
+            end_point,
+            lineColorRGB=[0.0, 1.0, 0.0],  # Verde (mais visível)
+            lineWidth=5,  # Mais grossa para melhor visibilidade
+            lifeTime=0.05  # Atualiza mais rápido
+        )
     
     def reset(self, pos=None, orientation=None):
         """Reseta o robô para a posição inicial"""

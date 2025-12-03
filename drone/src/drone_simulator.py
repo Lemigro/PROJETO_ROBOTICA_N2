@@ -43,7 +43,7 @@ class DroneSimulator:
         p.setTimeStep(self.timestep)
         
         # Carregar plano
-        plane_id = p.loadURDF("plane.urdf")
+        _ = p.loadURDF("plane.urdf")
         
         # Criar drone (usando modelo simplificado ou racecar/husky)
         self.drone_model = config['drone'].get('model', 'quadrotor')
@@ -102,18 +102,19 @@ class DroneSimulator:
             baseOrientation=[0, 0, 0, 1]
         )
         
-        # Configurar propriedades físicas do drone para movimento suave
-        # Reduzir damping linear e angular para permitir movimento
+        # Configurar propriedades físicas do drone para estabilidade
+        # CORREÇÃO: Adicionar amortecimento angular para evitar rotações descontroladas
         p.changeDynamics(
             drone_id,
             -1,  # linkIndex: -1 para base
-            linearDamping=0.0,      # Sem amortecimento linear
-            angularDamping=0.0,    # Sem amortecimento angular
+            linearDamping=0.1,      # Amortecimento linear leve
+            angularDamping=1.5,    # CORREÇÃO: Amortecimento angular MUITO alto para evitar rotações
             lateralFriction=0.0,   # Sem fricção lateral
             spinningFriction=0.0,  # Sem fricção rotacional
             rollingFriction=0.0,   # Sem fricção de rolamento
             restitution=0.0,       # Sem restituição (sem quique)
-            mass=self.config['drone'].get('mass', 1.0)
+            mass=self.config['drone'].get('mass', 1.0),
+            localInertiaDiagonal=[0.1, 0.1, 0.1]  # CORREÇÃO: Inércia reduzida para estabilidade
         )
         
         # Desabilitar colisão com o chão temporariamente para teste
@@ -186,7 +187,7 @@ class DroneSimulator:
         euler = p.getEulerFromQuaternion(self.orientation)
         return np.array(euler)
     
-    def apply_control(self, force: np.ndarray, torque: np.ndarray, use_velocity_control: bool = False):
+    def apply_control(self, force: np.ndarray, torque: np.ndarray):
         """
         Aplica força e torque ao drone.
         
@@ -203,6 +204,46 @@ class DroneSimulator:
         
         # SEMPRE usar forças físicas reais (não controle de velocidade)
         # O controle de velocidade não funciona bem com gravidade no PyBullet
+        
+        # CORREÇÃO: Adicionar correção de orientação para manter drone plano
+        # Obtém orientação atual
+        _, quat = p.getBasePositionAndOrientation(self.drone_id)
+        euler = p.getEulerFromQuaternion(quat)
+        roll, pitch, _ = euler
+        
+        # CORREÇÃO: Força correção de roll e pitch para manter drone plano
+        # Ganhos altos para correção rápida de orientação
+        kp_roll = 50.0   # Ganho para correção de roll
+        kp_pitch = 50.0  # Ganho para correção de pitch
+        kd_roll = 15.0   # Amortecimento de roll
+        kd_pitch = 15.0  # Amortecimento de pitch
+        
+        # CORREÇÃO: Amortecimento MUITO forte de yaw para parar rotação completamente
+        kd_yaw = 50.0    # Amortecimento MUITO alto para parar rotação imediatamente
+        
+        # Obtém velocidade angular atual
+        _, ang_vel = p.getBaseVelocity(self.drone_id)
+        ang_vel_x, ang_vel_y, ang_vel_z = ang_vel
+        
+        # Correção de roll (força para zero)
+        roll_torque = -roll * kp_roll - ang_vel_x * kd_roll
+        # Correção de pitch (força para zero)
+        pitch_torque = -pitch * kp_pitch - ang_vel_y * kd_pitch
+        # CORREÇÃO: Amortecimento MUITO forte de yaw para parar qualquer rotação
+        yaw_torque = -ang_vel_z * kd_yaw  # Amortecimento muito alto
+        
+        # Adiciona correção ao torque existente
+        torque[0] += roll_torque
+        torque[1] += pitch_torque
+        # CORREÇÃO: Substitui torque de yaw ao invés de adicionar (mais agressivo)
+        torque[2] = yaw_torque  # Substitui completamente o torque de yaw
+        
+        # Limita torque de correção para não ser muito agressivo
+        max_correction_torque = 20.0
+        torque[0] = np.clip(torque[0], -max_correction_torque, max_correction_torque)
+        torque[1] = np.clip(torque[1], -max_correction_torque, max_correction_torque)
+        # CORREÇÃO: Limite maior para yaw para permitir amortecimento forte
+        torque[2] = np.clip(torque[2], -50.0, 50.0)  # Limite maior para amortecimento de yaw
         
         # Garantir que as forças sejam aplicadas corretamente
         # Verificar se a força Z é suficiente para compensar gravidade

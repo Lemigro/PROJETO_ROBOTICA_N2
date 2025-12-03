@@ -39,15 +39,13 @@ node-red
 ### Executar
 
 ```bash
-# Opção 1: Script automático
-.\scripts\iniciar_tudo.bat
-
-# Opção 2: Manual
 # Terminal 1 - Manipulador Planar
-python examples/exemplo_manipulador.py
+cd braco_mecanico
+python src/manipulador_planar.py
 
 # Terminal 2 - Robô Móvel
-python examples/exemplo_robo_movel.py
+cd braco_mecanico
+python src/robo_movel.py
 ```
 
 ### Configurar Node-RED
@@ -61,21 +59,15 @@ python examples/exemplo_robo_movel.py
 
 ```
 braco_mecanico/
-├── src/                    # Código fonte
-│   ├── manipulador_planar.py
-│   ├── robo_movel.py
+├── src/                    # Código fonte (executável diretamente)
+│   ├── manipulador_planar.py  # Executar: python src/manipulador_planar.py
+│   ├── robo_movel.py          # Executar: python src/robo_movel.py
 │   └── node_red_interface.py
-├── examples/               # Exemplos de execução
-│   ├── exemplo_manipulador.py
-│   └── exemplo_robo_movel.py
 ├── config/                 # Configurações
 │   ├── config.py
 │   └── requirements.txt
-├── node_red/              # Fluxos Node-RED
-│   └── node_red_flow_organizado.json
-└── scripts/               # Scripts utilitários
-    ├── iniciar_tudo.bat
-    └── testar_mqtt.py
+└── node_red/              # Fluxos Node-RED
+    └── node_red_flow_organizado.json
 ```
 
 ## 📊 Métricas (Node-RED)

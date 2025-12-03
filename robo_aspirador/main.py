@@ -146,6 +146,9 @@ class VacuumRobotSimulation:
                 # Obtém pose do robô
                 x, y, yaw = self.robot.get_pose()
                 
+                # Desenha linha visual (olhos) do robô - versão simplificada e mais clara
+                self.robot.draw_robot_vision(look_length=1.5)
+                
                 # Lê sensores
                 sensor_readings = self.sensors.read_all(
                     self.robot.robot_id,

@@ -138,28 +138,40 @@ class ExplorationController:
         min_distance = min(sensor_readings)
         
         # Detecta se está em canto (múltiplos sensores detectando obstáculos muito próximos)
-        close_sensors = sum(1 for d in sensor_readings if d < 0.2)
-        is_corner = close_sensors >= 2  # Pelo menos 2 sensores detectando muito próximo
+        # CORREÇÃO: Detecção mais sensível de canto
+        close_sensors = sum(1 for d in sensor_readings if d < 0.25)  # Aumentado threshold
+        very_close_sensors = sum(1 for d in sensor_readings if d < 0.15)  # Muito próximo
+        is_corner = close_sensors >= 2 or very_close_sensors >= 1  # Mais sensível
         
-        # Se há colisão ou está em canto, força manobra de escape agressiva IMEDIATA
-        if collision or is_corner:
+        # Detecta se está "colado" no obstáculo (muito próximo de múltiplos lados)
+        stuck_on_wall = min_distance < 0.15 and close_sensors >= 3
+        
+        # Se há colisão, está em canto ou colado na parede, força manobra de escape IMEDIATA
+        if collision or is_corner or stuck_on_wall:
             self.exploration_state = "escape"
             self.stuck_time = 0  # Reset contador
             self.escape_count += 1  # Incrementa contador de escape
-            # Recua mais e gira mais rápido quando em canto
-            if is_corner:
-                # Em canto: recua muito e gira muito rápido
-                return -2.0, self.turn_direction * 8.0  # Muito mais agressivo em cantos
+            self.turn_time = 0  # Reset tempo de escape para começar imediatamente
+            
+            # CORREÇÃO: Manobra mais agressiva - recua mais para sair do obstáculo
+            if stuck_on_wall or is_corner:
+                # Colado na parede ou em canto: recua mais e gira muito rápido
+                return -1.5, self.turn_direction * 12.0  # Recua mais e gira muito rápido
             else:
-                return -1.5, self.turn_direction * 6.0  # Recua e gira agressivamente (aumentado)
+                # Colisão simples: recua e gira
+                return -1.0, self.turn_direction * 10.0  # Recua e gira
         
         # Detecta se está preso (não se moveu)
+        # CORREÇÃO: Detecção muito mais rápida e eficiente
         if self.last_position is not None:
             dist_moved = math.sqrt(
                 (x - self.last_position[0])**2 + 
                 (y - self.last_position[1])**2
             )
-            if dist_moved < 0.03:  # Reduzido de 0.05 para 0.03 (mais sensível)
+            # Se não se moveu E está muito próximo de obstáculo, está preso
+            if dist_moved < 0.015 and min_distance < 0.3:  # Muito sensível quando próximo
+                self.stuck_time += 1
+            elif dist_moved < 0.03:  # Sensível quando longe também
                 self.stuck_time += 1
             else:
                 self.stuck_time = 0
@@ -169,68 +181,103 @@ class ExplorationController:
         
         self.last_position = (x, y)
         
-        # Se preso OU muito próximo de obstáculo OU em canto, tenta manobra de escape
-        if self.stuck_time > 10 or min_distance < 0.15 or is_corner:  # Muito mais sensível (reduzido de 15)
+        # CORREÇÃO: Se preso OU muito próximo de obstáculo, força escape IMEDIATO
+        # Threshold muito reduzido para detectar mais rápido
+        if self.stuck_time > 5 or (min_distance < 0.2 and self.stuck_time > 2):  # Muito mais rápido
             self.exploration_state = "escape"
-            if self.stuck_time > 10:
+            self.turn_time = 0  # Reset para começar escape imediatamente
+            if self.stuck_time > 5:
                 self.stuck_time = 0
                 self.escape_count += 1
         
         # Máquina de estados simples
         if self.exploration_state == "escape":
-            # Manobra de escape: recua e gira mais agressivamente
-            # Se está em canto ou muito preso, aumenta agressividade
-            is_very_stuck = is_corner or self.escape_count > 2
+            # CORREÇÃO: Escape mais direto - gira uma vez e segue, não fica dando voltas
+            is_very_stuck = is_corner or stuck_on_wall or self.escape_count > 2
             
-            if self.turn_time < 30:  # Aumentado de 20 para 30 (mais tempo recuando)
-                # Recua mais e gira mais rápido, especialmente se muito preso
+            # Verifica se ainda está preso durante o escape
+            still_stuck = min_distance < 0.25
+            
+            if self.turn_time < 20:  # Primeiros 20 passos: recua e gira
+                # Recua para sair do obstáculo e gira
                 recue_speed = -1.5 if is_very_stuck else -1.0
-                turn_speed = 7.0 if is_very_stuck else 5.0
+                turn_speed = 8.0 if is_very_stuck else 6.0
                 return recue_speed, self.turn_direction * turn_speed
-            elif self.turn_time < 100:  # Aumentado de 60 para 100 (mais tempo girando)
-                # Gira no lugar mais rápido
-                turn_speed = 6.0 if is_very_stuck else 4.0
+            elif self.turn_time < 40:  # Próximos 20 passos: gira no lugar para mudar direção
+                # Gira no lugar para garantir mudança de direção
+                turn_speed = 6.0 if still_stuck else 5.0
                 return 0.0, self.turn_direction * turn_speed
+            elif self.turn_time < 60:  # Próximos 20 passos: avança testando
+                # Avança testando se saiu da parede
+                if still_stuck:
+                    # Se ainda preso, recua um pouco mais
+                    return -0.5, self.turn_direction * 4.0
+                # Se saiu, avança normalmente
+                return 2.0, 0.0  # Avança reto, sem girar
             else:
-                # Tenta avançar um pouco antes de resetar
-                if self.turn_time < 120:
-                    return 0.5, self.turn_direction * 2.0  # Avança devagar
-                else:
-                    self.exploration_state = "forward"
-                    self.turn_time = 0
-                    self.turn_direction *= -1  # Muda direção para próxima vez
-                    if self.escape_count > 5:  # Se tentou muito, reseta contador
-                        self.escape_count = 0
+                # Reset estado e volta para exploração normal
+                self.exploration_state = "forward"
+                self.turn_time = 0
+                # Muda direção para próxima vez (alterna)
+                self.turn_direction *= -1
+                if self.escape_count > 3:  # Se tentou muito, reseta contador
+                    self.escape_count = 0
         
-        # Evasão de obstáculos (mais agressiva em cantos)
-        # Se está em canto, força escape ao invés de apenas evitar
-        if is_corner:
+        # Evasão de obstáculos
+        # CORREÇÃO: Se está em canto ou colado, força escape direto
+        if is_corner or stuck_on_wall:
             self.exploration_state = "escape"
             self.turn_time = 0  # Reset tempo de escape
-            return -2.0, self.turn_direction * 8.0  # Escape imediato e agressivo
+            # Recua e gira para sair, mas não muito rápido
+            return -1.0, self.turn_direction * 8.0
         
+        # CORREÇÃO: Quando próximo de parede, segue a parede ao invés de ficar girando
         if min_distance < 0.5:
             self.exploration_state = "avoid"
+            
+            # Se está muito próximo de uma parede, tenta seguir a parede
+            if min_distance < 0.3:
+                # Encontra qual sensor está mais próximo (parede à frente, esquerda ou direita)
+                front_dist = sensor_readings[0] if len(sensor_readings) > 0 else 2.0
+                left_dist = sensor_readings[3] if len(sensor_readings) > 3 else 2.0
+                right_dist = sensor_readings[4] if len(sensor_readings) > 4 else 2.0
+                
+                # Se parede à frente, gira para o lado com mais espaço
+                if front_dist < 0.3:
+                    if right_dist > left_dist:
+                        # Mais espaço à direita, gira para direita e segue
+                        return 1.5, -4.0  # Avança e gira para direita
+                    else:
+                        # Mais espaço à esquerda, gira para esquerda e segue
+                        return 1.5, 4.0  # Avança e gira para esquerda
+                # Se parede ao lado, segue reto ou ajusta levemente
+                elif left_dist < 0.3:
+                    # Parede à esquerda, ajusta levemente para direita
+                    return 2.0, -2.0
+                elif right_dist < 0.3:
+                    # Parede à direita, ajusta levemente para esquerda
+                    return 2.0, 2.0
+            
+            # Evasão normal usando potential field
             linear, angular = self.avoidance_controller.compute_velocity(sensor_readings)
-            if min_distance < 0.2:  # Muito próximo
-                angular *= 1.5
-                linear *= 0.5
+            if min_distance < 0.25:  # Muito próximo
+                angular *= 1.2  # Ajuste suave
+                linear *= 0.7  # Reduz velocidade
             return linear, angular
         
         # Exploração normal
         self.exploration_state = "forward"
         
-        # NOVO: Usa sugestões do otimizador para evitar áreas já limpas
+        # CORREÇÃO: Melhor exploração para cobrir todo o mapa
         target_direction = None
         skip_current_area = False
         
         if optimization_suggestions and coverage_map:
             # Verifica se deve pular a área atual
-            # Usa método estático para verificar se deve pular área
             map_x, map_y = coverage_map.world_to_map(x, y)
             if coverage_map.is_valid_cell(map_x, map_y):
                 coverage = coverage_map.get_coverage(map_x, map_y)
-                skip_current_area = coverage > 5.0  # Threshold de alta cobertura
+                skip_current_area = coverage > 4.0  # Threshold reduzido para explorar mais
             else:
                 skip_current_area = False
             
@@ -247,8 +294,8 @@ class ExplorationController:
                     # Combina direção preferida com áreas não exploradas
                     unexplored_dir = self._find_unexplored_direction(current_pose, coverage_map)
                     if unexplored_dir is not None:
-                        # Média ponderada: 70% área não explorada, 30% direção preferida
-                        target_direction = 0.7 * unexplored_dir + 0.3 * preferred
+                        # Média ponderada: 80% área não explorada, 20% direção preferida (ajustado)
+                        target_direction = 0.8 * unexplored_dir + 0.2 * preferred
                     else:
                         target_direction = preferred
                 else:
@@ -261,16 +308,18 @@ class ExplorationController:
             sensor_readings, target_direction
         )
         
+        # CORREÇÃO: Movimento mais fluido e constante
         # Se está em área já limpa, aumenta velocidade para passar mais rápido
         if skip_current_area:
-            linear *= 3.0  # 200% mais rápido (aumentado de 2.5)
-            angular *= 0.4  # Menos rotação (vai direto, reduzido de 0.5)
+            linear *= 2.5  # Mais rápido mas não tanto (reduzido de 3.0)
+            angular *= 0.5  # Menos rotação (ajustado)
         
-        # Se não há obstáculos próximos, aumenta velocidade
+        # Se não há obstáculos próximos, aumenta velocidade para exploração mais rápida
         min_sensor = min(sensor_readings) if sensor_readings else 2.0
         safe_dist = self.avoidance_controller.safe_distance
         if min_sensor > safe_dist * 3:
-            linear *= 1.5  # 50% mais rápido quando muito seguro
+            linear *= 1.3  # Aumento moderado (reduzido de 1.5) para movimento mais fluido
+            angular *= 0.8  # Reduz rotação quando seguro para movimento mais direto
         
         self.turn_time += 1
         return linear, angular

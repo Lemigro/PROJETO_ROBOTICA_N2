@@ -137,10 +137,10 @@ Um conjunto de simulações focadas nos fundamentos matemáticos e físicos da r
 ```bash
 cd braco_mecanico
 # Terminal 1 - Manipulador Planar
-python examples/exemplo_manipulador.py
+python src/manipulador_planar.py
 
 # Terminal 2 - Robô Móvel
-python examples/exemplo_robo_movel.py
+python src/robo_movel.py
 ```
 
 ### **Comunicação MQTT**
