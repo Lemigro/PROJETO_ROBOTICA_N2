@@ -1,4 +1,0 @@
-"""
-Scripts de teste
-"""
-

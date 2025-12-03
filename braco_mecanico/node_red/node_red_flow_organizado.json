@@ -9,7 +9,7 @@
         "broker": "mqtt_broker",
         "x": 120,
         "y": 100,
-        "wires": [["manipulador_parse", "manipulador_chart_erro"]]
+        "wires": [["manipulador_parse"]]
     },
     {
         "id": "manipulador_parse",
@@ -179,7 +179,7 @@
         "broker": "mqtt_broker",
         "x": 120,
         "y": 100,
-        "wires": [["robo_parse", "robo_chart_distancia"]]
+        "wires": [["robo_parse"]]
     },
     {
         "id": "robo_parse",
@@ -324,34 +324,44 @@
     {
         "id": "manipulador_group",
         "type": "ui_group",
+        "z": "",
         "name": "Manipulador Planar",
         "tab": "manipulador_tab",
         "order": 1,
         "disp": true,
-        "width": "12"
+        "width": "12",
+        "collapse": false
     },
     {
         "id": "robo_group",
         "type": "ui_group",
+        "z": "",
         "name": "Robô Móvel",
         "tab": "robo_tab",
         "order": 1,
         "disp": true,
-        "width": "12"
+        "width": "12",
+        "collapse": false
     },
     {
         "id": "manipulador_tab",
         "type": "ui_tab",
+        "z": "",
         "name": "Manipulador Planar",
         "icon": "fa-robot",
-        "order": 1
+        "order": 1,
+        "disabled": false,
+        "hidden": false
     },
     {
         "id": "robo_tab",
         "type": "ui_tab",
+        "z": "",
         "name": "Robô Móvel",
         "icon": "fa-car",
-        "order": 2
+        "order": 2,
+        "disabled": false,
+        "hidden": false
     }
 ]
 

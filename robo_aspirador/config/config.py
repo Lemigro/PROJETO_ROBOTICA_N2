@@ -11,8 +11,8 @@ import os
 # Parâmetros físicos
 ROBOT_WHEEL_RADIUS = 0.05  # metros
 ROBOT_WHEEL_BASE = 0.2     # metros
-ROBOT_MAX_VELOCITY = 3.0   # m/s (aumentado de 2.0)
-ROBOT_MAX_ANGULAR_VELOCITY = 4.0  # rad/s (aumentado de 3.0)
+ROBOT_MAX_VELOCITY = 10.0   # m/s
+ROBOT_MAX_ANGULAR_VELOCITY = 12.0  # rad/s (aumentado de 10.0)
 ROBOT_MASS = 1.0           # kg
 
 # Controle

@@ -9,7 +9,7 @@ import math
 class ObstacleAvoidanceController:
     """Controlador de evasão de obstáculos usando potencial fields"""
     
-    def __init__(self, safe_distance=0.3, max_speed=2.5, max_angular_speed=3.0):
+    def __init__(self, safe_distance=0.25, max_speed=10.0, max_angular_speed=12.0):
         """
         Inicializa o controlador
         
@@ -81,19 +81,23 @@ class ObstacleAvoidanceController:
             # Velocidade linear baseada na distância mínima
             min_distance = min(sensor_readings)
             if min_distance < self.safe_distance:
-                # Em vez de parar, recua levemente e gira
-                linear_speed = -0.1  # Recua menos (aumentado de -0.2)
+                # Em vez de recuar, para e gira (mais eficiente)
+                linear_speed = 0.0  # Para ao invés de recuar
             elif min_distance < self.safe_distance * 1.5:
-                linear_speed = self.max_speed * 0.6  # Reduz velocidade (aumentado de 0.4)
+                linear_speed = self.max_speed * 0.7  # Reduz velocidade quando próximo
             else:
-                linear_speed = self.max_speed * 1.0  # Velocidade máxima (aumentado de 0.9)
+                linear_speed = self.max_speed * 1.0  # Velocidade máxima quando seguro
             
             # Velocidade angular para seguir a direção calculada
             # Assume que o robô está sempre apontando para frente (yaw = 0)
-            angular_speed = direction * 3.0  # Ganho proporcional aumentado (de 2.0 para 3.0)
+            # Se muito próximo de obstáculo, gira mais rápido
+            if min_distance < self.safe_distance:
+                angular_speed = direction * 10.0  # Gira mais rápido quando próximo
+            else:
+                angular_speed = direction * 6.0  # Gira normalmente quando seguro
             angular_speed = np.clip(angular_speed, -self.max_angular_speed, self.max_angular_speed)
         else:
-            linear_speed = self.max_speed * 0.5
+            linear_speed = self.max_speed * 0.8  # Aumentado de 0.5 para 0.8
             angular_speed = 0.0
         
         return linear_speed, angular_speed
@@ -110,13 +114,14 @@ class ExplorationController:
             avoidance_controller: Instância de ObstacleAvoidanceController
         """
         self.avoidance_controller = avoidance_controller
-        self.exploration_state = "forward"  # forward, turn, avoid
+        self.exploration_state = "forward"  # forward, turn, avoid, escape
         self.turn_direction = 1  # 1 para direita, -1 para esquerda
         self.turn_time = 0
         self.stuck_time = 0
         self.last_position = None
+        self.escape_count = 0  # Contador de tentativas de escape
     
-    def compute_velocity(self, sensor_readings, current_pose, coverage_map=None, optimization_suggestions=None):
+    def compute_velocity(self, sensor_readings, current_pose, coverage_map=None, optimization_suggestions=None, collision=False):
         """
         Calcula velocidade para exploração
         
@@ -132,42 +137,82 @@ class ExplorationController:
         x, y, _ = current_pose
         min_distance = min(sensor_readings)
         
+        # Detecta se está em canto (múltiplos sensores detectando obstáculos muito próximos)
+        close_sensors = sum(1 for d in sensor_readings if d < 0.2)
+        is_corner = close_sensors >= 2  # Pelo menos 2 sensores detectando muito próximo
+        
+        # Se há colisão ou está em canto, força manobra de escape agressiva IMEDIATA
+        if collision or is_corner:
+            self.exploration_state = "escape"
+            self.stuck_time = 0  # Reset contador
+            self.escape_count += 1  # Incrementa contador de escape
+            # Recua mais e gira mais rápido quando em canto
+            if is_corner:
+                # Em canto: recua muito e gira muito rápido
+                return -2.0, self.turn_direction * 8.0  # Muito mais agressivo em cantos
+            else:
+                return -1.5, self.turn_direction * 6.0  # Recua e gira agressivamente (aumentado)
+        
         # Detecta se está preso (não se moveu)
         if self.last_position is not None:
             dist_moved = math.sqrt(
                 (x - self.last_position[0])**2 + 
                 (y - self.last_position[1])**2
             )
-            if dist_moved < 0.05:  # Não se moveu significativamente
+            if dist_moved < 0.03:  # Reduzido de 0.05 para 0.03 (mais sensível)
                 self.stuck_time += 1
             else:
                 self.stuck_time = 0
+                # Se se moveu, reduz contador de escape
+                if self.escape_count > 0:
+                    self.escape_count = max(0, self.escape_count - 1)
         
         self.last_position = (x, y)
         
-        # Se preso OU muito próximo de obstáculo, tenta manobra de escape
-        if self.stuck_time > 30 or min_distance < 0.25:
+        # Se preso OU muito próximo de obstáculo OU em canto, tenta manobra de escape
+        if self.stuck_time > 10 or min_distance < 0.15 or is_corner:  # Muito mais sensível (reduzido de 15)
             self.exploration_state = "escape"
-            if self.stuck_time > 30:
+            if self.stuck_time > 10:
                 self.stuck_time = 0
+                self.escape_count += 1
         
         # Máquina de estados simples
         if self.exploration_state == "escape":
-            # Manobra de escape: recua e gira
-            if self.turn_time < 30:
-                return -0.5, self.turn_direction * 2.5
-            elif self.turn_time < 90:
-                return 0.0, self.turn_direction * 3.0
+            # Manobra de escape: recua e gira mais agressivamente
+            # Se está em canto ou muito preso, aumenta agressividade
+            is_very_stuck = is_corner or self.escape_count > 2
+            
+            if self.turn_time < 30:  # Aumentado de 20 para 30 (mais tempo recuando)
+                # Recua mais e gira mais rápido, especialmente se muito preso
+                recue_speed = -1.5 if is_very_stuck else -1.0
+                turn_speed = 7.0 if is_very_stuck else 5.0
+                return recue_speed, self.turn_direction * turn_speed
+            elif self.turn_time < 100:  # Aumentado de 60 para 100 (mais tempo girando)
+                # Gira no lugar mais rápido
+                turn_speed = 6.0 if is_very_stuck else 4.0
+                return 0.0, self.turn_direction * turn_speed
             else:
-                self.exploration_state = "forward"
-                self.turn_time = 0
-                self.turn_direction *= -1
+                # Tenta avançar um pouco antes de resetar
+                if self.turn_time < 120:
+                    return 0.5, self.turn_direction * 2.0  # Avança devagar
+                else:
+                    self.exploration_state = "forward"
+                    self.turn_time = 0
+                    self.turn_direction *= -1  # Muda direção para próxima vez
+                    if self.escape_count > 5:  # Se tentou muito, reseta contador
+                        self.escape_count = 0
         
-        # Evasão de obstáculos
+        # Evasão de obstáculos (mais agressiva em cantos)
+        # Se está em canto, força escape ao invés de apenas evitar
+        if is_corner:
+            self.exploration_state = "escape"
+            self.turn_time = 0  # Reset tempo de escape
+            return -2.0, self.turn_direction * 8.0  # Escape imediato e agressivo
+        
         if min_distance < 0.5:
             self.exploration_state = "avoid"
             linear, angular = self.avoidance_controller.compute_velocity(sensor_readings)
-            if min_distance < 0.3:
+            if min_distance < 0.2:  # Muito próximo
                 angular *= 1.5
                 linear *= 0.5
             return linear, angular
@@ -218,8 +263,14 @@ class ExplorationController:
         
         # Se está em área já limpa, aumenta velocidade para passar mais rápido
         if skip_current_area:
-            linear *= 1.5  # 50% mais rápido (aumentado de 1.3)
-            angular *= 0.7  # Menos rotação (vai direto, reduzido de 0.8)
+            linear *= 3.0  # 200% mais rápido (aumentado de 2.5)
+            angular *= 0.4  # Menos rotação (vai direto, reduzido de 0.5)
+        
+        # Se não há obstáculos próximos, aumenta velocidade
+        min_sensor = min(sensor_readings) if sensor_readings else 2.0
+        safe_dist = self.avoidance_controller.safe_distance
+        if min_sensor > safe_dist * 3:
+            linear *= 1.5  # 50% mais rápido quando muito seguro
         
         self.turn_time += 1
         return linear, angular

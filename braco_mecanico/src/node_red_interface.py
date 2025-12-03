@@ -82,23 +82,34 @@ class NodeRedInterface:
             system_name: Nome do sistema ('manipulador_planar' ou 'robo_movel')
             metrics: Dicionário com as métricas
         """
+        # Converter valores numpy para tipos nativos do Python (evita problemas de serialização)
+        clean_metrics = {}
+        for key, value in metrics.items():
+            if hasattr(value, 'item'):  # numpy scalar
+                clean_metrics[key] = float(value.item())
+            elif isinstance(value, (int, float)):
+                clean_metrics[key] = float(value)
+            else:
+                clean_metrics[key] = value
+        
         # Adicionar timestamp
         payload = {
             'timestamp': time.time(),
             'system': system_name,
-            'metrics': metrics
+            'metrics': clean_metrics
         }
         
         # Tentar enviar via MQTT
         if self.client and self.connected:
             try:
                 topic = f"{self.topic_prefix}/{system_name}/metrics"
-                self.client.publish(topic, json.dumps(payload), qos=1)
+                json_payload = json.dumps(payload, default=str)
+                self.client.publish(topic, json_payload, qos=1)
             except Exception as e:
                 print(f"Erro ao enviar métricas via MQTT: {e}")
         
-        # Sempre exibir no console também
-        print(f"[{system_name}] Métricas: {json.dumps(metrics, indent=2)}")
+        # Exibir no console apenas uma vez (não repetir)
+        # Removido print repetitivo para evitar spam no console
     
     def disconnect(self):
         """Desconecta do broker MQTT"""

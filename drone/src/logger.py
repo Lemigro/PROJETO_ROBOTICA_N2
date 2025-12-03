@@ -68,7 +68,7 @@ class NodeRedLogger:
         if self.protocol == 'http':
             if current_time - self.last_http_send >= self.http_interval:
                 try:
-                    response = requests.post(
+                    requests.post(
                         self.http_url,
                         json=data,
                         timeout=1.0

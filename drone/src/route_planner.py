@@ -32,6 +32,8 @@ class RoutePlanner:
         return_to_base: bool = True,
         base_pos: Optional[np.ndarray] = None
     ) -> List[DeliveryPoint]:
+        # return_to_base e base_pos reservados para uso futuro
+        _ = return_to_base, base_pos
         """
         Algoritmo Nearest Neighbor para planejamento de rota.
         
@@ -234,6 +236,8 @@ class RoutePlanner:
         current_pos: np.ndarray,
         route: List[DeliveryPoint]
     ) -> Optional[DeliveryPoint]:
+        # current_pos reservado para uso futuro (pode ser usado para escolher melhor próximo alvo)
+        _ = current_pos
         """
         Retorna o próximo alvo da rota.
         

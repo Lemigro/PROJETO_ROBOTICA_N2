@@ -1,131 +1,125 @@
-# 🤖 Projeto Robótica N2 - Braço Mecânico e Robô Móvel
+# 🤖 Braço Mecânico e Robô Móvel
 
 Sistema completo de simulação robótica com controle PID, visualização 3D e monitoramento em tempo real via Node-RED.
 
-## 📁 Estrutura do Projeto
+## 📋 Componentes
 
-```
-braco_mecanico/
-├── src/                    # Código fonte principal
-│   ├── manipulador_planar.py
-│   ├── robo_movel.py
-│   └── node_red_interface.py
-│
-├── examples/               # Exemplos de uso
-│   ├── exemplo_manipulador.py
-│   └── exemplo_robo_movel.py
-│
-├── config/                 # Configurações
-│   ├── config.py
-│   └── requirements.txt
-│
-├── docs/                   # Documentação
-│   ├── README.md (este arquivo)
-│   ├── COMO_INICIAR.md
-│   ├── CONFIGURACAO_NODE_RED.md
-│   └── ... (outros docs)
-│
-├── node_red/              # Fluxos Node-RED
-│   ├── node_red_flow_organizado.json
-│   └── node_red_flow.json
-│
-├── scripts/               # Scripts utilitários
-│   ├── teste_rapido.py
-│   ├── testar_mqtt.py
-│   ├── iniciar_tudo.bat
-│   └── instalar_node_red.bat
-│
-└── README.md             # Este arquivo
-```
+### 1. Manipulador Planar (2/3 DOF)
+- Controle PID por junta
+- Cinemática direta
+- Reação a perturbações
+- Métricas: erro médio, tempo de estabilização, energia, overshoot
+
+### 2. Robô Móvel Diferencial
+- Evasão de obstáculos reativa
+- Sensores ultrassônicos (frontal e laterais)
+- Navegação com trajetória de referência
+- Métricas: colisões, distância percorrida, tempo de reação, erro lateral
 
 ## 🚀 Início Rápido
 
-### 1. Instalar Dependências
+### Pré-requisitos
+- Python 3.8+
+- Mosquitto MQTT Broker
+- Node-RED (opcional, para dashboards)
+
+### Instalação
+
 ```bash
+# Instalar dependências
 pip install -r config/requirements.txt
-```
 
-### 2. Iniciar Sistema
-```bash
-# Windows
-scripts\iniciar_tudo.bat
-
-# Ou manualmente:
-# 1. Iniciar Mosquitto
+# Iniciar Mosquitto (Windows)
 net start mosquitto
 
-# 2. Iniciar Node-RED
+# Iniciar Node-RED
 node-red
+```
 
-# 3. Importar fluxo: node_red/node_red_flow_organizado.json
+### Executar
 
-# 4. Executar sistemas
+```bash
+# Opção 1: Script automático
+.\scripts\iniciar_tudo.bat
+
+# Opção 2: Manual
+# Terminal 1 - Manipulador Planar
 python examples/exemplo_manipulador.py
+
+# Terminal 2 - Robô Móvel
 python examples/exemplo_robo_movel.py
 ```
 
-### 3. Testar Sistema
-```bash
-# Teste rápido
-python scripts/teste_rapido.py
+### Configurar Node-RED
 
-# Teste MQTT
-python scripts/testar_mqtt.py
+1. Acesse: http://localhost:1880
+2. Importe: `node_red/node_red_flow_organizado.json`
+3. Faça Deploy
+4. Acesse Dashboard: http://localhost:1880/ui
+
+## 📁 Estrutura
+
+```
+braco_mecanico/
+├── src/                    # Código fonte
+│   ├── manipulador_planar.py
+│   ├── robo_movel.py
+│   └── node_red_interface.py
+├── examples/               # Exemplos de execução
+│   ├── exemplo_manipulador.py
+│   └── exemplo_robo_movel.py
+├── config/                 # Configurações
+│   ├── config.py
+│   └── requirements.txt
+├── node_red/              # Fluxos Node-RED
+│   └── node_red_flow_organizado.json
+└── scripts/               # Scripts utilitários
+    ├── iniciar_tudo.bat
+    └── testar_mqtt.py
 ```
 
-### 3. Acessar Dashboard
-http://localhost:1880/ui
+## 📊 Métricas (Node-RED)
 
-## 📚 Documentação
+### Manipulador Planar
+- Erro médio de posição (gráfico + gauge)
+- Tempo de estabilização (gauge)
+- Energia total gasta (gauge)
+- Overshoot máximo (gauge)
+- Status de estabilização
 
-- **Início Rápido**: `docs/INICIO_RAPIDO.md`
-- **Guia Completo**: `docs/COMO_INICIAR.md`
-- **Node-RED**: `docs/CONFIGURACAO_NODE_RED.md`
-- **Ajustes**: `docs/AJUSTES_REALIZADOS.md`
-
-## 🎯 Componentes
-
-### 1. Manipulador Planar 2/3 DOF
-- Controle PID por junta
-- Cinemática direta
-- Métricas: erro, tempo de estabilização, energia, overshoot
-
-### 2. Robô Móvel Diferencial
-- Evasão de obstáculos
-- Sensores ultrassônicos
-- Métricas: colisões, distância, tempo de reação
-
-### 3. Node-RED Dashboard
-- Visualização em tempo real
-- Gráficos e gauges
-- Abas separadas por projeto
+### Robô Móvel
+- Distância percorrida (gráfico)
+- Número de colisões
+- Tempo de reação médio
+- Erro médio lateral
 
 ## 🔧 Configuração
 
 Edite `config/config.py` para ajustar:
-- Parâmetros PID
+- Parâmetros PID (Kp, Ki, Kd)
 - Limites de torque/velocidade
 - Configurações MQTT
 
-## 📖 Documentação
+## 📚 Documentação Adicional
 
-- **Estrutura**: `ESTRUTURA_PROJETO.md`
-- **Início Rápido**: `docs/INICIO_RAPIDO.md`
-- **Guia Completo**: `docs/COMO_INICIAR.md`
-- **Node-RED**: `docs/CONFIGURACAO_NODE_RED.md`
+- **Como Executar**: `COMO_EXECUTAR.md`
+- **Correções**: `CORRECAO_ROBO_MOVEL.md`
+- **Documentação Completa**: `docs/`
 
-## 📊 Requisitos
+## 🆘 Troubleshooting
 
-- Python 3.8+
-- PyBullet >= 3.2.7
-- Node.js (para Node-RED)
-- Mosquitto MQTT Broker
+### MQTT não conecta
+```bash
+# Verificar Mosquitto
+sc query mosquitto
+net start mosquitto
+```
 
-## 🆘 Suporte
+### Dashboard vazio
+- Verifique se os projetos estão executando
+- Verifique se o fluxo Node-RED foi importado
+- Veja painel Debug do Node-RED
 
-Veja `docs/COMO_INICIAR.md` para troubleshooting.
-
-## 📝 Licença
-
-Projeto educacional.
-
+### Robô não segue a linha
+- Verifique `CORRECAO_ROBO_MOVEL.md` para correções aplicadas
+- Ajuste parâmetros PID se necessário

@@ -41,15 +41,23 @@ class VacuumRobotSimulation:
         p.setGravity(0, 0, -9.81)
         
         # Configurações da simulação
-        p.setTimeStep(1./240.)  # 240 Hz
+        p.setTimeStep(1./120.)  # 120 Hz (reduzido de 240 para simulação mais rápida)
         p.setRealTimeSimulation(0)  # Step-by-step
+        
+        # Configurações de física para melhor estabilidade
+        p.setPhysicsEngineParameter(
+            numSolverIterations=30,  # Reduzido de 50 para simulação mais rápida
+            fixedTimeStep=1./120.,  # Reduzido de 240 para 120 Hz
+            numSubSteps=1
+        )
         
         # Cria ambiente
         self.environment = VacuumEnvironment(self.physics_client, add_obstacles=True)
         
-        # Cria robô
-        start_pos = [0, 0, 0.1]
-        start_orientation = [0, 0, 0]
+        # Cria robô (altura ajustada para ficar acima do chão)
+        # Altura do robô = 0.03 * 2 = 0.06m, então centro precisa estar a pelo menos 0.06m
+        start_pos = [0, 0, 0.08]  # Altura suficiente para robô ficar acima do chão
+        start_orientation = [0, 0, 0]  # roll=0, pitch=0, yaw=0 (plano)
         self.robot = VacuumRobot(self.physics_client, start_pos, start_orientation)
         
         # Cria sensores
@@ -57,9 +65,9 @@ class VacuumRobotSimulation:
         
         # Cria controladores
         avoidance_controller = ObstacleAvoidanceController(
-            safe_distance=0.3,
-            max_speed=2.5,
-            max_angular_speed=3.0
+            safe_distance=0.25,
+            max_speed=10.0,
+            max_angular_speed=12.0
         )
         self.controller = ExplorationController(avoidance_controller)
         
@@ -120,6 +128,21 @@ class VacuumRobotSimulation:
                 # Passo da simulação
                 p.stepSimulation()
                 
+                # Força correção de orientação a cada passo (mantém plano)
+                pos, quat = p.getBasePositionAndOrientation(self.robot.robot_id)
+                euler = p.getEulerFromQuaternion(quat)
+                roll, pitch, yaw = euler
+                
+                # Se está muito inclinado, força correção imediata
+                if abs(roll) > 0.2 or abs(pitch) > 0.2:
+                    # Força orientação correta
+                    corrected_quat = p.getQuaternionFromEuler([0, 0, yaw])
+                    p.resetBasePositionAndOrientation(
+                        self.robot.robot_id,
+                        pos,
+                        corrected_quat
+                    )
+                
                 # Obtém pose do robô
                 x, y, yaw = self.robot.get_pose()
                 
@@ -135,7 +158,7 @@ class VacuumRobotSimulation:
                 self.map.update_occupancy(x, y, sensor_readings, sensor_angles, yaw)
                 
                 # Atualiza cobertura
-                dt = 1./240.
+                dt = 1./120.  # Reduzido de 240 para 120 Hz
                 self.map.update_coverage(x, y, dt)
                 
                 # Adiciona ponto à trajetória
@@ -145,16 +168,27 @@ class VacuumRobotSimulation:
                 # Obtém sugestões de otimização
                 suggestions = self.optimizer.get_optimization_suggestions(self.map)
                 
-                # Calcula velocidade (passa sugestões de otimização)
+                # Verifica colisão ANTES de calcular velocidade (para usar no controle)
+                collision = self.environment.check_collision(self.robot.robot_id)
+                
+                # Calcula velocidade (passa sugestões de otimização e informação de colisão)
                 linear, angular = self.controller.compute_velocity(
                     sensor_readings,
                     (x, y, yaw),
                     coverage_map=self.map if self.execution_number > 1 else None,
-                    optimization_suggestions=suggestions if self.execution_number > 1 else None
+                    optimization_suggestions=suggestions if self.execution_number > 1 else None,
+                    collision=collision  # Passa informação de colisão
                 )
                 
-                # Aplica velocidade ao robô
-                self.robot.set_velocity(linear, angular)
+                # Debug: mostra velocidades calculadas (a cada 50 passos)
+                if self.step_count % 50 == 0:
+                    print(f"[DEBUG] Velocidades calculadas: linear={linear:.2f} m/s, angular={angular:.2f} rad/s, colisão={collision}")
+                
+                # Calcula distância mínima para passar ao robô (para correção de orientação)
+                min_sensor_distance = min(sensor_readings) if sensor_readings else 2.0
+                
+                # Aplica velocidade ao robô (passa informação de colisão e distância para correção de orientação)
+                self.robot.set_velocity(linear, angular, collision=collision, min_distance=min_sensor_distance)
                 
                 # Atualiza energia
                 self.robot.update_energy(dt)
@@ -162,9 +196,6 @@ class VacuumRobotSimulation:
                 # Calcula incremento de energia
                 energy_delta = self.robot.energy_consumed - self.last_energy
                 self.last_energy = self.robot.energy_consumed
-                
-                # Verifica colisão
-                collision = self.environment.check_collision(self.robot.robot_id)
                 
                 # Atualiza métricas
                 self.metrics.update([x, y], energy_delta, collision)
@@ -183,8 +214,12 @@ class VacuumRobotSimulation:
                     
                     # Print no console
                     if self.step_count % 100 == 0:
+                        # Obtém velocidades atuais do robô
+                        current_linear, current_angular = self.robot.get_velocity()
                         print(f"Tempo: {self.simulation_time:.1f}s | "
                               f"Cobertura: {coverage_pct:.1f}% | "
+                              f"Velocidade: {current_linear:.2f} m/s | "
+                              f"Angular: {current_angular:.2f} rad/s | "
                               f"Energia: {self.robot.energy_consumed:.2f}J | "
                               f"Colisões: {self.metrics.collisions}")
                 
@@ -201,8 +236,8 @@ class VacuumRobotSimulation:
                     print("Área totalmente coberta!")
                     break
                 
-                # Sleep para visualização
-                time.sleep(1./240.)
+                # Sleep para visualização (reduzido para simulação mais rápida)
+                time.sleep(1./960.)  # Reduzido de 1/480 para 1/960 (4x mais rápido)
         
         except KeyboardInterrupt:
             print("\nSimulação interrompida pelo usuário")

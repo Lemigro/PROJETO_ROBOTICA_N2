@@ -30,7 +30,7 @@ class PIDController:
         self.kd = kd
         self.integral = 0.0
         self.prev_error = 0.0
-        self.max_torque = 15.0  # Limite de torque aumentado
+        self.max_torque = 15.0  # Limite de torque
         
     def compute(self, error: float, dt: float) -> float:
         """Calcula o torque baseado no erro"""
@@ -39,6 +39,8 @@ class PIDController:
         
         # Termo integral
         self.integral += error * dt
+        # Limitar integral para evitar windup
+        self.integral = np.clip(self.integral, -2.0, 2.0)
         i_term = self.ki * self.integral
         
         # Termo derivativo
@@ -76,6 +78,13 @@ class ManipuladorPlanar:
         # Conectar ao PyBullet
         if use_gui:
             self.physics_client = p.connect(p.GUI)
+            # Configurar câmera para melhor visualização
+            p.resetDebugVisualizerCamera(
+                cameraDistance=2.5,
+                cameraYaw=45,
+                cameraPitch=-30,
+                cameraTargetPosition=[0, 0, 0.5]
+            )
         else:
             self.physics_client = p.connect(p.DIRECT)
         
@@ -85,13 +94,13 @@ class ManipuladorPlanar:
         # Criar o plano
         self.plane_id = p.loadURDF("plane.urdf")
         
-        # Ângulos de referência (inicializar antes de criar o manipulador)
+        # Ângulos de referência
         self.target_angles = [0.0] * self.num_joints
         
         # Criar o manipulador
         self.create_manipulator()
         
-        # Controladores PID para cada junta (ajustados para melhor desempenho)
+        # Controladores PID para cada junta
         self.controllers = [PIDController(kp=5.0, ki=0.2, kd=1.0) for _ in range(self.num_joints)]
         
         # Métricas
@@ -108,168 +117,179 @@ class ManipuladorPlanar:
         self.node_red = NodeRedInterface()
         
     def create_manipulator(self):
-        """Cria o manipulador planar usando abordagem simplificada"""
+        """Cria o manipulador planar usando MultiBody com juntas rotacionais"""
         # Parâmetros do manipulador
         link_length = 0.5  # Comprimento de cada elo (metros)
         link_mass = 1.0    # Massa de cada elo (kg)
         link_radius = 0.05 # Raio do elo (metros)
+        base_height = 0.2  # Altura da base
         
-        # Criar base fixa
+        # Listas para armazenar shapes e juntas dos LINKS (não inclui a base)
+        link_masses = []
+        link_collision_indices = []
+        link_visual_indices = []
+        link_positions = []
+        link_orientations = []
+        link_inertias = []
+        link_parent_indices = []
+        link_joint_types = []
+        link_joint_axes = []
+        
+        # ===== BASE (fixa) - criada separadamente =====
         base_visual = p.createVisualShape(
             shapeType=p.GEOM_CYLINDER,
-            radius=0.1,
-            length=0.2,
+            radius=0.12,
+            length=base_height,
             rgbaColor=[0.5, 0.5, 0.5, 1]
         )
         base_collision = p.createCollisionShape(
             shapeType=p.GEOM_CYLINDER,
-            radius=0.1,
-            height=0.2
-        )
-        self.base_id = p.createMultiBody(
-            baseMass=0,
-            baseCollisionShapeIndex=base_collision,
-            baseVisualShapeIndex=base_visual,
-            basePosition=[0, 0, 0.1]
+            radius=0.12,
+            height=base_height
         )
         
-        # Criar juntas e elos
-        self.link_ids = []
-        self.joint_pivot_positions = []  # Posições dos pivôs das juntas
-        
-        prev_body = self.base_id
-        prev_pos = [0, 0, 0.1]
-        cumulative_angle = 0.0
-        
+        # ===== ELOS ARTICULADOS =====
         for i in range(self.num_joints):
-            cumulative_angle += self.target_angles[i]
-            
-            # Criar elo
+            # Criar shape visual e de colisão para o elo
             link_visual = p.createVisualShape(
                 shapeType=p.GEOM_BOX,
                 halfExtents=[link_length/2, link_radius, link_radius],
-                rgbaColor=[0.2, 0.6, 0.8, 1]
+                rgbaColor=[0.2, 0.6, 0.8, 1] if i % 2 == 0 else [0.8, 0.4, 0.2, 1]
             )
             link_collision = p.createCollisionShape(
                 shapeType=p.GEOM_BOX,
                 halfExtents=[link_length/2, link_radius, link_radius]
             )
             
-            # Posição do elo (centro do elo)
+            link_visual_indices.append(link_visual)
+            link_collision_indices.append(link_collision)
+            link_masses.append(link_mass)
+            
+            # Posição do centro do elo relativa ao parent
+            # O elo começa na junta anterior e se estende por link_length
             if i == 0:
-                # Primeiro elo conectado à base
-                link_pos = [
-                    prev_pos[0] + (link_length/2) * math.cos(cumulative_angle),
-                    prev_pos[1] + (link_length/2) * math.sin(cumulative_angle),
-                    prev_pos[2]
-                ]
-                pivot_pos = prev_pos
+                # Primeiro elo: conectado à base
+                # Centro do elo está a link_length/2 da base no eixo X
+                link_positions.append([link_length/2, 0, base_height])
             else:
-                # Elos subsequentes
-                prev_link_pos, _ = p.getBasePositionAndOrientation(self.link_ids[i-1])
-                pivot_pos = [
-                    prev_link_pos[0] + link_length * math.cos(sum(self.target_angles[:i])),
-                    prev_link_pos[1] + link_length * math.sin(sum(self.target_angles[:i])),
-                    prev_link_pos[2]
-                ]
-                link_pos = [
-                    pivot_pos[0] + (link_length/2) * math.cos(cumulative_angle),
-                    pivot_pos[1] + (link_length/2) * math.sin(cumulative_angle),
-                    pivot_pos[2]
-                ]
+                # Elos subsequentes: conectados ao final do elo anterior
+                # O final do elo anterior está em [link_length, 0, 0] relativo ao seu centro
+                # Então o centro deste elo está em [link_length/2, 0, 0] relativo à junta
+                link_positions.append([link_length/2, 0, 0])
             
-            link_id = p.createMultiBody(
-                baseMass=link_mass,
-                baseCollisionShapeIndex=link_collision,
-                baseVisualShapeIndex=link_visual,
-                basePosition=link_pos,
-                baseOrientation=p.getQuaternionFromEuler([0, 0, cumulative_angle])
-            )
+            link_orientations.append([0, 0, 0, 1])
             
-            # Garantir que link_id é um inteiro
-            if not isinstance(link_id, int):
-                link_id = int(link_id)
+            # Inércia do elo (caixa)
+            # I = (1/12) * m * (l^2 + h^2) para rotação em torno do eixo perpendicular
+            inertia_xx = (1/12) * link_mass * (link_radius**2 + link_radius**2)
+            inertia_yy = (1/12) * link_mass * (link_length**2 + link_radius**2)
+            inertia_zz = (1/12) * link_mass * (link_length**2 + link_radius**2)
+            link_inertias.append([inertia_xx, inertia_yy, inertia_zz])
             
-            # Conectar elo ao corpo anterior usando constraint de ponto
-            # Isso permite rotação livre em torno do eixo Z
-            constraint_id = p.createConstraint(
-                prev_body,
-                -1,
-                link_id,
-                -1,
-                jointType=p.JOINT_POINT2POINT,
-                jointAxis=[0, 0, 0],
-                parentFramePosition=[0, 0, 0],
-                childFramePosition=[0, 0, 0]
-            )
+            # Parent é o link anterior (ou base para o primeiro)
+            # No PyBullet, -1 significa a base, 0 é o primeiro link, etc.
+            if i == 0:
+                link_parent_indices.append(-1)  # Primeiro elo conectado à base
+            else:
+                link_parent_indices.append(i - 1)  # Elos subsequentes conectados ao anterior
             
-            # Configurar constraint para permitir rotação
-            p.changeConstraint(constraint_id, maxForce=100, erp=1.0)
-            
-            self.link_ids.append(link_id)
-            self.joint_pivot_positions.append(pivot_pos)
-            
-            prev_body = link_id
-            prev_pos = link_pos
+            # Junta rotacional no eixo Z (rotação no plano XY)
+            link_joint_types.append(p.JOINT_REVOLUTE)
+            link_joint_axes.append([0, 0, 1])  # Eixo Z para rotação no plano
         
-        # Criar efetuador (pode adicionar peso)
+        # ===== EFETUADOR =====
         efetuador_visual = p.createVisualShape(
             shapeType=p.GEOM_SPHERE,
-            radius=0.05,
+            radius=0.06,
             rgbaColor=[1.0, 0.0, 0.0, 1]
         )
         efetuador_collision = p.createCollisionShape(
             shapeType=p.GEOM_SPHERE,
-            radius=0.05
+            radius=0.06
         )
         
-        # Posição do efetuador no final do último elo
-        last_link_pos, _ = p.getBasePositionAndOrientation(self.link_ids[-1])
-        total_angle = sum(self.target_angles)
-        efetuador_pos = [
-            last_link_pos[0] + link_length/2 * math.cos(total_angle),
-            last_link_pos[1] + link_length/2 * math.sin(total_angle),
-            last_link_pos[2]
-        ]
+        link_visual_indices.append(efetuador_visual)
+        link_collision_indices.append(efetuador_collision)
+        link_masses.append(0.3)  # Massa do efetuador
+        link_positions.append([link_length/2, 0, 0])  # No final do último elo (ponta)
+        link_orientations.append([0, 0, 0, 1])
+        link_inertias.append([0.001, 0.001, 0.001])
+        link_parent_indices.append(self.num_joints - 1)  # Conectado ao último elo (índice do link, 0-based)
+        link_joint_types.append(p.JOINT_FIXED)  # Fixo ao último elo
+        link_joint_axes.append([0, 0, 0])
         
-        self.efetuador_id = p.createMultiBody(
-            baseMass=0.5,  # Peso do efetuador (pode variar para testar perturbações)
-            baseCollisionShapeIndex=efetuador_collision,
-            baseVisualShapeIndex=efetuador_visual,
-            basePosition=efetuador_pos
+        # Criar o MultiBody
+        # A base é criada como baseMass/baseCollisionShapeIndex
+        # Os links são os elos + efetuador
+        num_links = len(link_masses)  # Todos os links (elos + efetuador)
+        self.robot_id = p.createMultiBody(
+            baseMass=0,  # Base fixa (sem massa)
+            baseCollisionShapeIndex=base_collision,
+            baseVisualShapeIndex=base_visual,
+            basePosition=[0, 0, 0],
+            baseOrientation=[0, 0, 0, 1],
+            linkMasses=link_masses,  # Todos os links
+            linkCollisionShapeIndices=link_collision_indices,
+            linkVisualShapeIndices=link_visual_indices,
+            linkPositions=link_positions,
+            linkOrientations=link_orientations,
+            linkInertialFramePositions=[[0, 0, 0]] * num_links,
+            linkInertialFrameOrientations=[[0, 0, 0, 1]] * num_links,
+            linkParentIndices=link_parent_indices,
+            linkJointTypes=link_joint_types,
+            linkJointAxis=link_joint_axes
         )
         
-        # Conectar efetuador ao último elo
-        p.createConstraint(
-            self.link_ids[-1],
-            -1,
-            self.efetuador_id,
-            -1,
-            jointType=p.JOINT_FIXED,
-            jointAxis=[0, 0, 0],
-            parentFramePosition=[link_length/2, 0, 0],
-            childFramePosition=[0, 0, 0]
-        )
+        # Verificar quantas juntas realmente existem
+        num_joints_actual = p.getNumJoints(self.robot_id)
+        # Deve ser igual a num_joints (juntas rotacionais) + 1 (junta fixa do efetuador)
+        if num_joints_actual != self.num_joints + 1:
+            print(f"Aviso: Número de juntas criadas: {num_joints_actual}, esperado: {self.num_joints + 1} (rotacionais + fixa)")
+        
+        # Configurar juntas para controle de torque
+        # Desabilitar controle automático das juntas (vamos controlar manualmente)
+        # No PyBullet, as juntas são numeradas a partir de 0
+        # Apenas configurar as juntas rotacionais (não a fixa do efetuador)
+        for i in range(self.num_joints):
+            if i < num_joints_actual:
+                p.setJointMotorControl2(
+                    self.robot_id,
+                    i,  # Juntas começam no índice 0
+                    controlMode=p.VELOCITY_CONTROL,
+                    targetVelocity=0,
+                    force=0
+                )
+                # Permitir movimento livre
+                p.changeDynamics(
+                    self.robot_id,
+                    i,
+                    jointLowerLimit=-3.14,
+                    jointUpperLimit=3.14,
+                    jointDamping=0.1  # Pequeno amortecimento
+                )
+        
+        # Desabilitar colisão entre links do mesmo robô
+        # Base é -1, links são 0, 1, 2, ...
+        num_total_bodies = self.num_joints + 1  # Elos + efetuador (base não conta)
+        for i in range(-1, num_total_bodies):  # -1 é a base
+            for j in range(i + 1, num_total_bodies):
+                if i == -1:
+                    # Base com links
+                    p.setCollisionFilterPair(self.robot_id, self.robot_id, -1, j, 0)
+                else:
+                    # Links entre si
+                    p.setCollisionFilterPair(self.robot_id, self.robot_id, i, j, 0)
+        
+        # Armazenar índices das juntas (0, 1, 2, ...)
+        # Apenas as juntas rotacionais (excluindo a fixa do efetuador)
+        self.joint_indices = list(range(min(self.num_joints, num_joints_actual)))
     
     def get_joint_angles(self) -> List[float]:
-        """Obtém os ângulos atuais das juntas (encoder virtual)"""
+        """Obtém os ângulos atuais das juntas"""
         angles = []
-        
-        for i, link_id in enumerate(self.link_ids):
-            # Obter orientação do elo
-            _, orn = p.getBasePositionAndOrientation(link_id)
-            euler = p.getEulerFromQuaternion(orn)
-            # Ângulo no plano XY (rotação em Z)
-            angle = euler[2]
-            
-            if i > 0:
-                # Ângulo relativo ao elo anterior
-                _, prev_orn = p.getBasePositionAndOrientation(self.link_ids[i-1])
-                prev_euler = p.getEulerFromQuaternion(prev_orn)
-                angle = angle - prev_euler[2]
-            
-            angles.append(angle)
-        
+        for joint_idx in self.joint_indices:
+            joint_state = p.getJointState(self.robot_id, joint_idx)
+            angles.append(joint_state[0])  # Posição da junta (ângulo)
         return angles
     
     def set_target_angles(self, angles: List[float]):
@@ -302,21 +322,15 @@ class ManipuladorPlanar:
             # Calcular torque via PID
             torque = controller.compute(error, dt)
             
-            # Aplicar torque diretamente no elo
-            if i < len(self.link_ids):
-                link_id = self.link_ids[i]
-                # Garantir que link_id é um inteiro
-                if not isinstance(link_id, int):
-                    if isinstance(link_id, (list, tuple)) and len(link_id) > 0:
-                        link_id = int(link_id[0])
-                    else:
-                        continue
-                # Aplicar torque no eixo Z (rotação no plano XY)
-                # applyExternalTorque(objectUniqueId, linkIndex, torque, flags)
-                # linkIndex = -1 para o link base
-                p.applyExternalTorque(link_id, -1, [0, 0, float(torque)], flags=p.WORLD_FRAME)
+            # Aplicar torque na junta usando TORQUE_CONTROL
+            p.setJointMotorControl2(
+                self.robot_id,
+                self.joint_indices[i],
+                controlMode=p.TORQUE_CONTROL,
+                force=torque
+            )
             
-            # Calcular energia (aproximação: torque^2 * dt para melhor representação)
+            # Calcular energia (aproximação: torque^2 * dt)
             total_energy += (torque ** 2) * dt
             
             # Calcular overshoot
@@ -329,10 +343,10 @@ class ManipuladorPlanar:
         # Atualizar energia total
         self.metrics['energia_total'] += total_energy
         
-        # Verificar estabilização (com verificação de estabilidade contínua)
+        # Verificar estabilização
         if not self.metrics['estabilizado']:
             erro_atual = np.mean([abs(a - t) for a, t in zip(current_angles, self.target_angles)])
-            # Tolerância de 0.05 rad (mais realista)
+            # Tolerância de 0.05 rad
             # Verificar se está estável por pelo menos 0.5 segundos
             if erro_atual < 0.05:
                 if not hasattr(self, '_estabilizacao_inicio'):
@@ -359,12 +373,13 @@ class ManipuladorPlanar:
         """Retorna as métricas atuais"""
         erro_medio = np.mean(self.metrics['erro_medio']) if self.metrics['erro_medio'] else 0.0
         
+        # Converter valores numpy para float nativo
         return {
-            'erro_medio_posicao': erro_medio,
-            'tempo_estabilizacao': self.metrics['tempo_estabilizacao'] or 0.0,
-            'energia_total_gasta': self.metrics['energia_total'],
-            'overshoot_maximo': self.metrics['overshoot_maximo'],
-            'estabilizado': self.metrics['estabilizado']
+            'erro_medio_posicao': float(erro_medio),
+            'tempo_estabilizacao': float(self.metrics['tempo_estabilizacao'] or 0.0),
+            'energia_total_gasta': float(self.metrics['energia_total']),
+            'overshoot_maximo': float(self.metrics['overshoot_maximo']),
+            'estabilizado': bool(self.metrics['estabilizado'])
         }
     
     def send_metrics_to_node_red(self):
@@ -387,11 +402,14 @@ class ManipuladorPlanar:
             # Executar passo
             angles = self.step(dt)
             
-            # Enviar métricas a cada segundo
+            # Enviar métricas a cada segundo (apenas uma vez por segundo)
             if step_count % 240 == 0:
                 self.send_metrics_to_node_red()
+                # Exibir informações no console
+                erro_medio = np.mean(self.metrics['erro_medio']) if self.metrics['erro_medio'] else 0.0
                 print(f"Tempo: {current_time:.2f}s | Ângulos: {[f'{a:.3f}' for a in angles]} | "
-                      f"Target: {[f'{t:.3f}' for t in self.target_angles]}")
+                      f"Target: {[f'{t:.3f}' for t in self.target_angles]} | "
+                      f"Erro médio: {erro_medio:.4f} rad")
             
             step_count += 1
             
