@@ -1,20 +1,14 @@
-# 🤖 Braço Mecânico e Robô Móvel
+# 🤖 Braço Mecânico - Manipulador Planar
 
-Sistema completo de simulação robótica com controle PID, visualização 3D e monitoramento em tempo real via Node-RED.
+Sistema de simulação de manipulador planar com controle PID, visualização 3D e monitoramento em tempo real via Node-RED.
 
 ## 📋 Componentes
 
-### 1. Manipulador Planar (2/3 DOF)
+### Manipulador Planar (2/3 DOF)
 - Controle PID por junta
 - Cinemática direta
 - Reação a perturbações
 - Métricas: erro médio, tempo de estabilização, energia, overshoot
-
-### 2. Robô Móvel Diferencial
-- Evasão de obstáculos reativa
-- Sensores ultrassônicos (frontal e laterais)
-- Navegação com trajetória de referência
-- Métricas: colisões, distância percorrida, tempo de reação, erro lateral
 
 ## 🚀 Início Rápido
 
@@ -39,13 +33,9 @@ node-red
 ### Executar
 
 ```bash
-# Terminal 1 - Manipulador Planar
+# Terminal - Manipulador Planar
 cd braco_mecanico
-python src/manipulador_planar.py
-
-# Terminal 2 - Robô Móvel
-cd braco_mecanico
-python src/robo_movel.py
+python main.py
 ```
 
 ### Configurar Node-RED
@@ -59,14 +49,14 @@ python src/robo_movel.py
 
 ```
 braco_mecanico/
-├── src/                    # Código fonte (executável diretamente)
-│   ├── manipulador_planar.py  # Executar: python src/manipulador_planar.py
-│   ├── robo_movel.py          # Executar: python src/robo_movel.py
+├── main.py                # Executar: python main.py
+├── src/                   # Código fonte
+│   ├── manipulador_planar.py
 │   └── node_red_interface.py
-├── config/                 # Configurações
+├── config/                # Configurações
 │   ├── config.py
 │   └── requirements.txt
-└── node_red/              # Fluxos Node-RED
+└── node_red/             # Fluxos Node-RED
     └── node_red_flow_organizado.json
 ```
 
@@ -79,12 +69,6 @@ braco_mecanico/
 - Overshoot máximo (gauge)
 - Status de estabilização
 
-### Robô Móvel
-- Distância percorrida (gráfico)
-- Número de colisões
-- Tempo de reação médio
-- Erro médio lateral
-
 ## 🔧 Configuração
 
 Edite `config/config.py` para ajustar:
@@ -94,8 +78,6 @@ Edite `config/config.py` para ajustar:
 
 ## 📚 Documentação Adicional
 
-- **Como Executar**: `COMO_EXECUTAR.md`
-- **Correções**: `CORRECAO_ROBO_MOVEL.md`
 - **Documentação Completa**: `docs/`
 
 ## 🆘 Troubleshooting
@@ -112,6 +94,3 @@ net start mosquitto
 - Verifique se o fluxo Node-RED foi importado
 - Veja painel Debug do Node-RED
 
-### Robô não segue a linha
-- Verifique `CORRECAO_ROBO_MOVEL.md` para correções aplicadas
-- Ajuste parâmetros PID se necessário

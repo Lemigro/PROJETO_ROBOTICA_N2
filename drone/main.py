@@ -41,7 +41,10 @@ def main():
     controller = DroneController(control_config)
     sensor = ProximitySensor(config['sensor']['detection_radius'])
     route_planner = RoutePlanner(config['route_planning'])
-    logger = SimulationLogger(config['logging'])
+    # Mesclar configurações de logging e node_red para o logger
+    logger_config = config['logging'].copy()
+    logger_config['node_red'] = config.get('node_red', {})
+    logger = SimulationLogger(logger_config)
     
     # Estado da simulação
     base_position = np.array(config['simulation']['base_position'])

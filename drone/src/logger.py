@@ -61,6 +61,7 @@ class NodeRedLogger:
             data: Dicionário com dados a enviar
         """
         if not self.enabled:
+            logging.debug("Node-RED logger está desabilitado")
             return
         
         current_time = time.time()
@@ -68,14 +69,25 @@ class NodeRedLogger:
         if self.protocol == 'http':
             if current_time - self.last_http_send >= self.http_interval:
                 try:
-                    requests.post(
+                    logging.debug(f"Enviando dados para Node-RED: {self.http_url}")
+                    logging.debug(f"Dados: event={data.get('event', 'N/A')}")
+                    response = requests.post(
                         self.http_url,
                         json=data,
-                        timeout=1.0
+                        timeout=2.0
                     )
+                    if response.status_code != 200:
+                        logging.warning(f"Node-RED retornou status {response.status_code}")
+                    else:
+                        logging.debug(f"Dados enviados com sucesso para Node-RED (status {response.status_code})")
                     self.last_http_send = current_time
+                except requests.exceptions.ConnectionError as e:
+                    logging.error(f"ERRO: Não foi possível conectar ao Node-RED em {self.http_url}")
+                    logging.error(f"Certifique-se de que o Node-RED está rodando e o endpoint '/drone-data' está configurado")
+                except requests.exceptions.Timeout as e:
+                    logging.warning(f"Timeout ao enviar dados para Node-RED: {e}")
                 except Exception as e:
-                    logging.debug(f"Erro ao enviar HTTP: {e}")
+                    logging.error(f"Erro ao enviar HTTP para Node-RED: {type(e).__name__}: {e}")
         
         elif self.protocol == 'mqtt':
             if current_time - self.last_mqtt_send >= self.mqtt_interval:
@@ -120,8 +132,10 @@ class SimulationLogger:
         node_red_config = config.get('node_red', {})
         if node_red_config.get('enabled', False):
             self.node_red = NodeRedLogger(node_red_config)
+            self.logger.info(f"Node-RED habilitado: {node_red_config.get('protocol', 'http')} -> {node_red_config.get('http', {}).get('url', 'N/A')}")
         else:
             self.node_red = None
+            self.logger.info("Node-RED desabilitado")
         
         # Métricas
         self.metrics = {
@@ -268,11 +282,16 @@ class SimulationLogger:
         }
         
         if self.node_red:
-            self.node_red.send_data({
+            metrics = self.get_metrics_summary()
+            payload = {
                 'event': 'state',
                 'data': state,
-                'metrics': self.get_metrics_summary()
-            })
+                'metrics': metrics
+            }
+            self.logger.debug(f"Enviando estado para Node-RED: event=state, pos={state['drone_position']}")
+            self.node_red.send_data(payload)
+        else:
+            self.logger.debug("Node-RED não está habilitado, pulando envio de dados")
     
     def get_metrics_summary(self) -> dict:
         """Retorna resumo das métricas."""

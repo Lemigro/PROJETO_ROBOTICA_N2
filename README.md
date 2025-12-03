@@ -13,7 +13,8 @@ O objetivo é aplicar conceitos de **controle**, **planejamento**, **mapeamento*
 | ---------------------------------- | ----------------- | --------------------------------------- | ------------------------------------ |
 | 🚁 **Drone de Entregas**           | `/drone`          | Planejamento de rotas e controle de voo | TSP, Algoritmos Gulosos, PID         |
 | 🧹 **Robô Aspirador**              | `/robo_aspirador` | Mapeamento e aprendizado                | Grid Mapping, SLAM simples           |
-| 🦾 **Braço Mecânico & Robô Móvel** | `/braco_mecanico` | Controle e cinemática                   | PID, Cinemática Direta/Inversa, MQTT |
+| 🦾 **Braço Mecânico**               | `/braco_mecanico` | Controle e cinemática                   | PID, Cinemática Direta/Inversa, MQTT |
+| 🚗 **Robô Móvel**                   | `/robo_movel`     | Navegação e evasão de obstáculos        | PID, Sensores Ultrassônicos, MQTT    |
 
 ---
 
@@ -21,12 +22,17 @@ O objetivo é aplicar conceitos de **controle**, **planejamento**, **mapeamento*
 
 ```
 PROJETO_ROBOTICA_N2/
-├── braco_mecanico/         # Parte 1a e 1b
+├── braco_mecanico/         # Parte 1a - Manipulador Planar
 │   ├── src/                # Código fonte
 │   ├── examples/           # Exemplos de execução
 │   ├── config/             # Configurações
 │   ├── node_red/          # Fluxos Node-RED
 │   ├── scripts/            # Scripts utilitários
+│   └── README.md          # Documentação
+├── robo_movel/             # Parte 1b - Robô Móvel
+│   ├── src/                # Código fonte
+│   ├── config/             # Configurações
+│   ├── node_red/          # Fluxos Node-RED
 │   └── README.md          # Documentação
 ├── drone/                  # Parte 3
 │   ├── src/               # Código fonte
@@ -135,18 +141,21 @@ Um conjunto de simulações focadas nos fundamentos matemáticos e físicos da r
 ### **Executar**
 
 ```bash
+# Braço Mecânico
 cd braco_mecanico
-# Terminal 1 - Manipulador Planar
-python src/manipulador_planar.py
+python main.py
 
-# Terminal 2 - Robô Móvel
-python src/robo_movel.py
+# Robô Móvel (em pasta separada)
+cd robo_movel
+python main.py
 ```
 
 ### **Comunicação MQTT**
 
 * Envio estruturado de dados usando Mosquitto Broker
-* Tópicos: `robotica_n2/manipulador_planar/metrics` e `robotica_n2/robo_movel/metrics`
+* Tópicos: 
+  - Braço Mecânico: `robotica_n2/manipulador_planar/metrics`
+  - Robô Móvel: `robotica_n2/robo_movel/metrics`
 
 ---
 
@@ -165,6 +174,10 @@ Cada projeto é independente. Instale as dependências de cada um:
 ```bash
 # Braço Mecânico
 cd braco_mecanico
+pip install -r config/requirements.txt
+
+# Robô Móvel
+cd robo_movel
 pip install -r config/requirements.txt
 
 # Drone
@@ -190,7 +203,7 @@ node-red
 
 # 📊 Dashboard de Telemetria — Node-RED
 
-Os três projetos fornecem dados visualizados em um **dashboard único com 4 abas separadas**.
+Os quatro projetos fornecem dados visualizados em um **dashboard único com 4 abas separadas**.
 
 ### **Instalação**
 
@@ -211,17 +224,17 @@ node-red
 
 ### **Importar os Fluxos**
 
-Importe os 3 fluxos no Node-RED (pode importar todos de uma vez):
+Importe os 4 fluxos no Node-RED (pode importar todos de uma vez):
 
 1. **Braço Mecânico**: `braco_mecanico/node_red/node_red_flow_organizado.json`
-   - Cria 2 abas: "Manipulador Planar" e "Robô Móvel"
-   - Protocolo: **MQTT** (tópicos: `robotica_n2/manipulador_planar/metrics` e `robotica_n2/robo_movel/metrics`)
-
-2. **Drone**: `drone/node_red/node_red_complete.json`
+   - Protocolo: **MQTT** (tópico: `robotica_n2/manipulador_planar/metrics`)
+2. **Robô Móvel**: `robo_movel/node_red/node_red_flow.json`
+   - Protocolo: **MQTT** (tópico: `robotica_n2/robo_movel/metrics`)
+3. **Drone**: `drone/node_red/node_red_complete.json`
    - Cria 1 aba: "Drone de Entregas"
    - Protocolo: **HTTP** (endpoint: `/drone-data`)
 
-3. **Robô Aspirador**: `robo_aspirador/node-red/node-red-flow-corrigido.json`
+4. **Robô Aspirador**: `robo_aspirador/node-red/node-red-flow-corrigido.json`
    - Cria 1 aba: "Robô Aspirador"
    - Protocolo: **HTTP** (endpoint: `/robo-data`)
 

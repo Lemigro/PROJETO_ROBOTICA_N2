@@ -41,7 +41,7 @@ node_red:
   protocol: "http"  # ou "mqtt"
   http:
     url: "http://localhost:1880/drone-data"
-    interval: 0.5  # Intervalo de envio (segundos)
+    interval: 0.1  # Intervalo de envio (segundos) - reduzido para envio mais frequente
   mqtt:
     broker: "localhost"
     port: 1883
@@ -49,7 +49,7 @@ node_red:
     interval: 0.5
 
 logging:
-  level: "INFO"
+  level: "DEBUG"  # Alterado para DEBUG para ver mais informações
   file: "logs/drone_simulation.log"
   console: true
 

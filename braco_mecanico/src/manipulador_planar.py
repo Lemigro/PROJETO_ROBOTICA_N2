@@ -117,12 +117,18 @@ class ManipuladorPlanar:
         self.node_red = NodeRedInterface()
         
     def create_manipulator(self):
-        """Cria o manipulador planar usando MultiBody com juntas rotacionais"""
-        # Parâmetros do manipulador
+        """Cria o manipulador planar estilo Fanuc usando MultiBody com juntas rotacionais"""
+        # Parâmetros do manipulador (estilo Fanuc - mais robusto)
         link_length = 0.5  # Comprimento de cada elo (metros)
-        link_mass = 1.0    # Massa de cada elo (kg)
-        link_radius = 0.05 # Raio do elo (metros)
-        base_height = 0.2  # Altura da base
+        link_mass = 1.5    # Massa de cada elo (kg) - mais pesado
+        link_radius = 0.08 # Raio do elo (metros) - mais espesso
+        base_height = 0.25  # Altura da base - mais alta
+        base_radius = 0.15  # Raio da base - mais larga
+        
+        # Cores Fanuc: Amarelo (#FFD700) e Cinza escuro (#2C2C2C)
+        fanuc_yellow = [1.0, 0.843, 0.0, 1.0]  # Amarelo Fanuc
+        fanuc_gray = [0.17, 0.17, 0.17, 1.0]   # Cinza escuro Fanuc
+        fanuc_dark = [0.1, 0.1, 0.1, 1.0]      # Preto para juntas
         
         # Listas para armazenar shapes e juntas dos LINKS (não inclui a base)
         link_masses = []
@@ -135,30 +141,36 @@ class ManipuladorPlanar:
         link_joint_types = []
         link_joint_axes = []
         
-        # ===== BASE (fixa) - criada separadamente =====
+        # ===== BASE (fixa) - Estilo Fanuc (mais robusta) =====
         base_visual = p.createVisualShape(
             shapeType=p.GEOM_CYLINDER,
-            radius=0.12,
+            radius=base_radius,
             length=base_height,
-            rgbaColor=[0.5, 0.5, 0.5, 1]
+            rgbaColor=fanuc_gray  # Base cinza escura
         )
         base_collision = p.createCollisionShape(
             shapeType=p.GEOM_CYLINDER,
-            radius=0.12,
+            radius=base_radius,
             height=base_height
         )
         
-        # ===== ELOS ARTICULADOS =====
+        # ===== ELOS ARTICULADOS - Estilo Fanuc =====
         for i in range(self.num_joints):
-            # Criar shape visual e de colisão para o elo
+            # Criar shape visual e de colisão para o elo (estilo Fanuc)
+            # Alternar entre amarelo e cinza (estilo Fanuc)
+            link_color = fanuc_yellow if i % 2 == 0 else fanuc_gray
+            
+            # Usar cilindro para parecer mais industrial (estilo Fanuc)
             link_visual = p.createVisualShape(
-                shapeType=p.GEOM_BOX,
-                halfExtents=[link_length/2, link_radius, link_radius],
-                rgbaColor=[0.2, 0.6, 0.8, 1] if i % 2 == 0 else [0.8, 0.4, 0.2, 1]
+                shapeType=p.GEOM_CYLINDER,
+                radius=link_radius,
+                length=link_length,
+                rgbaColor=link_color
             )
             link_collision = p.createCollisionShape(
-                shapeType=p.GEOM_BOX,
-                halfExtents=[link_length/2, link_radius, link_radius]
+                shapeType=p.GEOM_CYLINDER,
+                radius=link_radius,
+                height=link_length
             )
             
             link_visual_indices.append(link_visual)
@@ -173,21 +185,21 @@ class ManipuladorPlanar:
                 link_positions.append([link_length/2, 0, base_height])
             else:
                 # Elos subsequentes: conectados ao final do elo anterior
-                # O final do elo anterior está em [link_length, 0, 0] relativo ao seu centro
-                # Então o centro deste elo está em [link_length/2, 0, 0] relativo à junta
                 link_positions.append([link_length/2, 0, 0])
             
-            link_orientations.append([0, 0, 0, 1])
+            # Orientação: cilindro ao longo do eixo X (rotação de 90° em Y)
+            link_orientations.append(p.getQuaternionFromEuler([0, math.pi/2, 0]))
             
-            # Inércia do elo (caixa)
-            # I = (1/12) * m * (l^2 + h^2) para rotação em torno do eixo perpendicular
-            inertia_xx = (1/12) * link_mass * (link_radius**2 + link_radius**2)
-            inertia_yy = (1/12) * link_mass * (link_length**2 + link_radius**2)
-            inertia_zz = (1/12) * link_mass * (link_length**2 + link_radius**2)
+            # Inércia do elo (cilindro)
+            # Para cilindro de raio r e comprimento l, massa m:
+            # Ixx = (1/12) * m * (3*r^2 + l^2)
+            # Iyy = Izz = (1/2) * m * r^2
+            inertia_xx = (1/12) * link_mass * (3 * link_radius**2 + link_length**2)
+            inertia_yy = (1/2) * link_mass * link_radius**2
+            inertia_zz = (1/2) * link_mass * link_radius**2
             link_inertias.append([inertia_xx, inertia_yy, inertia_zz])
             
             # Parent é o link anterior (ou base para o primeiro)
-            # No PyBullet, -1 significa a base, 0 é o primeiro link, etc.
             if i == 0:
                 link_parent_indices.append(-1)  # Primeiro elo conectado à base
             else:
@@ -197,21 +209,22 @@ class ManipuladorPlanar:
             link_joint_types.append(p.JOINT_REVOLUTE)
             link_joint_axes.append([0, 0, 1])  # Eixo Z para rotação no plano
         
-        # ===== EFETUADOR =====
+        # ===== EFETUADOR - Estilo Fanuc (gripper) =====
+        # Criar um gripper mais robusto (caixa retangular)
         efetuador_visual = p.createVisualShape(
-            shapeType=p.GEOM_SPHERE,
-            radius=0.06,
-            rgbaColor=[1.0, 0.0, 0.0, 1]
+            shapeType=p.GEOM_BOX,
+            halfExtents=[0.08, 0.06, 0.04],
+            rgbaColor=fanuc_yellow  # Amarelo Fanuc
         )
         efetuador_collision = p.createCollisionShape(
-            shapeType=p.GEOM_SPHERE,
-            radius=0.06
+            shapeType=p.GEOM_BOX,
+            halfExtents=[0.08, 0.06, 0.04]
         )
         
         link_visual_indices.append(efetuador_visual)
         link_collision_indices.append(efetuador_collision)
         link_masses.append(0.3)  # Massa do efetuador
-        link_positions.append([link_length/2, 0, 0])  # No final do último elo (ponta)
+        link_positions.append([link_length, 0, 0])  # No final do último elo (ponta)
         link_orientations.append([0, 0, 0, 1])
         link_inertias.append([0.001, 0.001, 0.001])
         link_parent_indices.append(self.num_joints - 1)  # Conectado ao último elo (índice do link, 0-based)
@@ -265,7 +278,7 @@ class ManipuladorPlanar:
                     i,
                     jointLowerLimit=-3.14,
                     jointUpperLimit=3.14,
-                    jointDamping=0.1  # Pequeno amortecimento
+                    jointDamping=0.15  # Amortecimento um pouco maior (estilo industrial)
                 )
         
         # Desabilitar colisão entre links do mesmo robô
